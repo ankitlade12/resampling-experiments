@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Miscelaneous
+.idea
+.vscode
+catboost_info/
+*.DS_Store
+
+# intermediate files
+*.csv
+*.zip
+*.pkl
+*.png
+
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
