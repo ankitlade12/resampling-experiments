@@ -2,11 +2,13 @@ import numpy as np
 from sklearn.base import clone
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold, ParameterSampler
+from sklearn.preprocessing import MinMaxScaler
+
 
 def undersample_data(undersampler, X, y, scale=False, return_index=False):
     """
     Returns 3-fold of undersampled training data with its corresponding
-    original left out fold.
+    original left-out fold.
     """
     skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=10)
 
@@ -47,7 +49,7 @@ def undersample_data(undersampler, X, y, scale=False, return_index=False):
 
             if scale is True:
                 datau, targetu = undersampler.fit_resample(
-                    MinMaxScaler().fit_transdorm(data),
+                    MinMaxScaler().fit_transform(data),
                     target,
                 )
             else:
@@ -76,11 +78,11 @@ def train_model_w_undersampling(model, params, xtrainu, ytrainu, xtest, ytest, X
     results = []
 
     # Loop over parameter combinations
-    for params in param_list:
+    for params_ in param_list:
         fold_scores = []
 
         # Update with low n_estimators for tuning
-        temp_params = params.copy()
+        temp_params = params_.copy()
         temp_params['n_estimators'] = 10
 
         # Cross-validation across the 3 folds

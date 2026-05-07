@@ -27,7 +27,7 @@ def train_model(estimator, params, X_train, y_train, refit=True):
 
 
 def train_model_with_undersampling(
-    undersampler, estimator, scale, params, X_train, y_train, folds
+    undersampler, estimator, scale, params, X_train, y_train, folds=3,
 ):
     # https://stackoverflow.com/questions/79748461/how-to-pass-pre-computed-folds-to-successivehalving-in-sklearn?
 
@@ -56,7 +56,7 @@ def train_model_with_undersampling(
         max_resources=500,  # max number of trees
         min_resources=10,
         scoring="roc_auc",
-        cv=3,
+        cv=folds,
         random_state=10,
         refit=True,
         n_jobs=-1,
