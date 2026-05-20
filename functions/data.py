@@ -47,6 +47,14 @@ DATASETS_KEEL = [
 
 DATASETS_LS = DATASETS_IMBLEARN + DATASETS_KEEL
 
+DATASETS_SEPARABLE = [
+    "dermatology-6",
+    "arrhythmia",
+    "kddcup-buffer_overflow_vs_back",
+    "kr-vs-k-one_vs_fifteen",
+    "shuttle-2_vs_5",
+]
+
 
 def load_dataset(dataset):
     if dataset in DATASETS_KEEL:
