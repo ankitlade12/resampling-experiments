@@ -3,7 +3,7 @@ Cross-validation utilities for training models on pre-undersampled data.
 
 The key design choice here is to undersample once before hyperparameter search
 rather than embedding the undersampler inside a pipeline. This avoids re-running
-slow undersamplers (e.g. CNN) on every candidate and resource level during
+slow undersamplers (e.g., CNN) on every candidate and resource level during
 successive halving, at the cost of some statistical purity.
 
 https://stackoverflow.com/questions/79748461/how-to-pass-pre-computed-folds-to-successivehalving-in-sklearn?
@@ -11,7 +11,7 @@ https://stackoverflow.com/questions/79748461/how-to-pass-pre-computed-folds-to-s
 
 import numpy as np
 from sklearn.base import clone
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import log_loss
 from sklearn.model_selection import StratifiedKFold, ParameterSampler
 from sklearn.preprocessing import MinMaxScaler
 
@@ -35,7 +35,7 @@ def undersample_data(undersampler, X, y, scale):
         Target vector.
     scale : bool, default=False
         If True, apply MinMaxScaler before undersampling so that distance-based
-        undersamplers (e.g. CNN) operate on comparable feature ranges. The
+        undersamplers (e.g., CNN) operate on comparable feature ranges. The
         returned data is always in the original scale.
 
     Returns
@@ -75,7 +75,7 @@ def undersample_data(undersampler, X, y, scale):
     for data, target in zip(xtrain, ytrain):
 
         if scale is True:
-            # Scale only to guide the undersampler (e.g. distance-based
+            # Scale only to guide the undersampler (e.g., distance-based
             # methods like CNN need consistent feature ranges), but return
             # the original-scale data so models are trained on raw values.
             undersampler.fit_resample(MinMaxScaler().fit_transform(data), target)
@@ -112,9 +112,10 @@ def train_model_w_undersampling(model, params, xtrainu, ytrainu, xtest, ytest, X
     Undersampling is applied once upfront (via `undersample_data`) rather than
     inside a pipeline, so slow undersamplers like CNN are not re-run on every
     candidate during hyperparameter search. The tuning uses a manual successive
-    halving approach: n_estimators=10 for fast candidate screening across 3
-    pre-built folds, then the best configuration is retrained with
-    n_estimators=500 on the full undersampled training set.
+    halving approach:
+      - Round 1: 100 candidates with n_estimators=10, scored on 3 folds
+      - Round 2: top 10 candidates with n_estimators=300, scored on 3 folds
+      - Final:   best candidate retrained with n_estimators=500 on full data
 
     Parameters
     ----------
@@ -130,38 +131,54 @@ def train_model_w_undersampling(model, params, xtrainu, ytrainu, xtest, ytest, X
         Full undersampled training set for final refit.
     """
 
-    n_iter = 20  # Number of parameter combinations to try
+    n_iter = 100
     param_list = list(ParameterSampler(params, n_iter=n_iter, random_state=42))
 
-    # Store results
+    # --- Round 1: screen all candidates with n_estimators=10 ---
     results = []
-
-    # Loop over parameter combinations
     for params_ in param_list:
         fold_scores = []
-
-        # Update with low n_estimators for tuning
         temp_params = params_.copy()
         temp_params["n_estimators"] = 10
 
-        # Cross-validation across the 3 folds
         for i in range(3):
             clf = clone(model)
             clf.set_params(**temp_params)
             clf.fit(xtrainu[i], ytrainu[i])
             y_pred = clf.predict_proba(xtest[i])[:, 1]
-            score = roc_auc_score(ytest[i], y_pred)
+            score = log_loss(ytest[i], y_pred)
             fold_scores.append(score)
 
         avg_score = np.mean(fold_scores)
         results.append((params_, avg_score))
 
-    # Get best parameters
-    best_params, best_score = max(results, key=lambda x: x[1])
+    # Promote top 10 (lowest log loss)
+    top10 = sorted(results, key=lambda x: x[1])[:10]
 
-    # Retrain with n_estimators=500
+    # --- Round 2: re-evaluate top 10 with n_estimators=300 ---
+    results_r2 = []
+    for params_, _ in top10:
+        fold_scores = []
+        temp_params = params_.copy()
+        temp_params["n_estimators"] = 300
+
+        for i in range(3):
+            clf = clone(model)
+            clf.set_params(**temp_params)
+            clf.fit(xtrainu[i], ytrainu[i])
+            y_pred = clf.predict_proba(xtest[i])[:, 1]
+            score = log_loss(ytest[i], y_pred)
+            fold_scores.append(score)
+
+        avg_score = np.mean(fold_scores)
+        results_r2.append((params_, avg_score))
+
+    # Select best configuration
+    best_params, best_score = min(results_r2, key=lambda x: x[1])
+
+    # --- Final refit with n_estimators=500 on full undersampled data ---
     best_params_final = best_params.copy()
-    best_params_final["n_estimators"] = 500
+    best_params_final["n_estimators"] = 800
 
     model = clone(model)
     model.set_params(**best_params_final)
