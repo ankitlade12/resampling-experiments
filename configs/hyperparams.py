@@ -1,6 +1,6 @@
 from scipy import stats
 
-hyperparam_classical_dict = {
+hyperparam_ensemble_dict = {
     "rf_params": {
         "max_depth": (1, 2, 3, 4, 8, None),
         "min_samples_split": stats.randint(2, 20),
@@ -55,17 +55,21 @@ hyperparam_special_dict = {
 }
 
 
-# TODO: remove function, seems to be unused
-def append_model_prefix(param_dict):
-    """
-    Append 'model__' prefix to all keys in each subdictionary
-    """
-    result = {}
-
-    for model_name, params in param_dict.items():
-        prefixed_params = {}
-        for key, value in params.items():
-            prefixed_params[f"model__{key}"] = value
-        result[model_name] = prefixed_params
-
-    return result
+hyperparam_basic_dict = {
+    "logit": {
+        "clf__l1_ratio": stats.uniform(0, 1),
+        "clf__C": stats.uniform(0, 1),
+    },
+    "knn": {
+        "clf__n_neighbors": stats.randint(1, 10),
+        "clf__weights": ("uniform", "distance"),
+        "clf__p": (1, 2),
+    },
+    "tree": {
+        "criterion": ("gini", "entropy", "log_loss"),
+        "max_depth": (1, 2, 3, 4, 8, None),
+        "min_samples_split": stats.randint(2, 20),
+        "min_samples_leaf": stats.randint(2, 20),
+        "max_features": ("log2", 0.25, "sqrt", 1.0),
+    },
+}

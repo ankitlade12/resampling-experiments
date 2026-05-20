@@ -1,3 +1,9 @@
+"""Undersampling strategies for imbalanced datasets.
+
+This module provides various undersampling techniques for handling imbalanced datasets.
+Each undersampler is configured with default parameters as described in their respective
+original articles.
+"""
 from imblearn.under_sampling import (
     RandomUnderSampler,
     CondensedNearestNeighbour,
@@ -9,9 +15,6 @@ from imblearn.under_sampling import (
     NeighbourhoodCleaningRule,
     NearMiss,
 )
-
-# undersamplers are set up with the configurations
-# described in the original articles.
 
 rus = RandomUnderSampler(
     sampling_strategy="auto",
