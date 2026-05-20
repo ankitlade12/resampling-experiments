@@ -51,3 +51,43 @@ def test_final_model_has_800_estimators(undersampled_folds, params):
         xtrainu, ytrainu, xtest, ytest, Xu, yu
     )
     assert model.n_estimators == 800
+
+
+def test_scoring_metrics_produce_different_results(undersampled_folds, params):
+    xtrainu, ytrainu, xtest, ytest, Xu, yu = undersampled_folds
+
+    model_log_loss = train_model_w_undersampling(
+        RandomForestClassifier(random_state=10), params,
+        xtrainu, ytrainu, xtest, ytest, Xu, yu,
+        scoring="log_loss"
+    )
+
+    model_roc_auc = train_model_w_undersampling(
+        RandomForestClassifier(random_state=10), params,
+        xtrainu, ytrainu, xtest, ytest, Xu, yu,
+        scoring="roc_auc"
+    )
+
+    model_brier = train_model_w_undersampling(
+        RandomForestClassifier(random_state=10), params,
+        xtrainu, ytrainu, xtest, ytest, Xu, yu,
+        scoring="brier"
+    )
+
+    # extract the hyperparameters selected by each scoring metric
+    params_log_loss = {k: v for k, v in model_log_loss.get_params().items()}
+    params_roc_auc = {k: v for k, v in model_roc_auc.get_params().items()}
+    params_brier = {k: v for k, v in model_brier.get_params().items()}
+
+    # different scoring metrics should select different hyperparameter configurations
+    assert params_log_loss != params_roc_auc or params_log_loss != params_brier
+
+
+def test_invalid_scoring_raises(undersampled_folds, params):
+    xtrainu, ytrainu, xtest, ytest, Xu, yu = undersampled_folds
+    with pytest.raises(ValueError, match="scoring must be one of"):
+        train_model_w_undersampling(
+            RandomForestClassifier(random_state=10), params,
+            xtrainu, ytrainu, xtest, ytest, Xu, yu,
+            scoring="invalid_metric"
+        )

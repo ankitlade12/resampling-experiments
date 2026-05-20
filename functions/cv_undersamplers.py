@@ -11,7 +11,7 @@ https://stackoverflow.com/questions/79748461/how-to-pass-pre-computed-folds-to-s
 
 import numpy as np
 from sklearn.base import clone
-from sklearn.metrics import log_loss
+from sklearn.metrics import log_loss, roc_auc_score, brier_score_loss
 from sklearn.model_selection import StratifiedKFold, ParameterSampler
 from sklearn.preprocessing import MinMaxScaler
 
@@ -105,17 +105,17 @@ def undersample_data(undersampler, X, y, scale):
     return xtrainu, ytrainu, xtest, ytest, Xu, yu, stats
 
 
-def train_model_w_undersampling(model, params, xtrainu, ytrainu, xtest, ytest, Xu, yu):
+def train_model_w_undersampling(model, params, xtrainu, ytrainu, xtest, ytest, Xu, yu, scoring="roc_auc"):
     """
     Tune and train a model on pre-undersampled data.
 
     Undersampling is applied once upfront (via `undersample_data`) rather than
     inside a pipeline, so slow undersamplers like CNN are not re-run on every
-    candidate during hyperparameter search. The tuning uses a manual successive
-    halving approach:
+    candidate during hyperparameter search.
+    The tuning uses a manual successive halving approach:
       - Round 1: 100 candidates with n_estimators=10, scored on 3 folds
       - Round 2: top 10 candidates with n_estimators=300, scored on 3 folds
-      - Final:   best candidate retrained with n_estimators=500 on full data
+      - Final:   best candidate retrained with n_estimators=800 on full data
 
     Parameters
     ----------
@@ -129,7 +129,14 @@ def train_model_w_undersampling(model, params, xtrainu, ytrainu, xtest, ytest, X
         Per-fold held-out test sets produced by `undersample_data`.
     Xu, yu : arrays
         Full undersampled training set for final refit.
+    scoring : str, default="roc_auc"
+        Scoring metric to use for hyperparameter tuning.
+        One of "log_loss", "roc_auc", or "brier".
     """
+
+    valid_scorings = ("log_loss", "roc_auc", "brier")
+    if scoring not in valid_scorings:
+        raise ValueError(f"scoring must be one of {valid_scorings}, got '{scoring}'")
 
     n_iter = 100
     param_list = list(ParameterSampler(params, n_iter=n_iter, random_state=42))
@@ -146,14 +153,22 @@ def train_model_w_undersampling(model, params, xtrainu, ytrainu, xtest, ytest, X
             clf.set_params(**temp_params)
             clf.fit(xtrainu[i], ytrainu[i])
             y_pred = clf.predict_proba(xtest[i])[:, 1]
-            score = log_loss(ytest[i], y_pred)
-            fold_scores.append(score)
+
+            if scoring == "log_loss":
+                fold_scores.append(log_loss(ytest[i], y_pred))
+            elif scoring == "roc_auc":
+                fold_scores.append(roc_auc_score(ytest[i], y_pred))
+            elif scoring == "brier":
+                fold_scores.append(brier_score_loss(ytest[i], y_pred))
 
         avg_score = np.mean(fold_scores)
         results.append((params_, avg_score))
 
-    # Promote top 10 (lowest log loss)
-    top10 = sorted(results, key=lambda x: x[1])[:10]
+    # Promote top 10
+    if scoring == "roc_auc":
+        top10 = sorted(results, key=lambda x: x[1], reverse=True)[:10]
+    else:
+        top10 = sorted(results, key=lambda x: x[1])[:10]
 
     # --- Round 2: re-evaluate top 10 with n_estimators=300 ---
     results_r2 = []
@@ -167,16 +182,24 @@ def train_model_w_undersampling(model, params, xtrainu, ytrainu, xtest, ytest, X
             clf.set_params(**temp_params)
             clf.fit(xtrainu[i], ytrainu[i])
             y_pred = clf.predict_proba(xtest[i])[:, 1]
-            score = log_loss(ytest[i], y_pred)
-            fold_scores.append(score)
+
+            if scoring == "log_loss":
+                fold_scores.append(log_loss(ytest[i], y_pred))
+            elif scoring == "roc_auc":
+                fold_scores.append(roc_auc_score(ytest[i], y_pred))
+            elif scoring == "brier":
+                fold_scores.append(brier_score_loss(ytest[i], y_pred))
 
         avg_score = np.mean(fold_scores)
         results_r2.append((params_, avg_score))
 
     # Select best configuration
-    best_params, best_score = min(results_r2, key=lambda x: x[1])
+    if scoring == "roc_auc":
+        best_params, best_score = max(results_r2, key=lambda x: x[1])
+    else:
+        best_params, best_score = min(results_r2, key=lambda x: x[1])
 
-    # --- Final refit with n_estimators=500 on full undersampled data ---
+    # --- Final refit with n_estimators=800 on full undersampled data ---
     best_params_final = best_params.copy()
     best_params_final["n_estimators"] = 800
 
