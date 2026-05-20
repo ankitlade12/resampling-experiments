@@ -5,25 +5,37 @@ Loads each model saved by the train-{undersampler}.py scripts, evaluates it on t
 test set using bootstrapped samples, and stores one results pickle per undersampler
 in its corresponding models folder.
 """
-import sys
+
 import pickle
+import sys
 import warnings
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 import joblib
 from tqdm import tqdm
 
+from configs.ensemble_models import estimator_dict
 from functions.data import DATASETS_LS, load_dataset
-from configs.classical_models import estimator_dict
 from functions.evaluation import evaluate_model_on_test_set
 
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action="ignore", category=FutureWarning)
 
-UNDERSAMPLERS = ["rus", "cnn", "tomek", "oss", "enn", "renn", "allknn", "ncr", "nm1", "nm2"]
+UNDERSAMPLERS = [
+    "rus",
+    "cnn",
+    "tomek",
+    "oss",
+    "enn",
+    "renn",
+    "allknn",
+    "ncr",
+    "nm1",
+    "nm2",
+]
 
 for undersampler in tqdm(UNDERSAMPLERS, desc="Undersamplers"):
     models_dir = REPO_ROOT / "models" / undersampler
@@ -35,9 +47,11 @@ for undersampler in tqdm(UNDERSAMPLERS, desc="Undersamplers"):
         scores_dict[dataset] = {}
 
         for estimator in estimator_dict:
-            model = joblib.load(models_dir / f"{dataset}_{estimator}_{undersampler}.pkl")
-            scores_dict[dataset][f"{estimator}_{undersampler}"] = evaluate_model_on_test_set(
-                model, X_test, y_test
+            model = joblib.load(
+                models_dir / f"{dataset}_{estimator}_{undersampler}.pkl"
+            )
+            scores_dict[dataset][f"{estimator}_{undersampler}"] = (
+                evaluate_model_on_test_set(model, X_test, y_test)
             )
 
     with open(models_dir / "results", "wb") as fp:
