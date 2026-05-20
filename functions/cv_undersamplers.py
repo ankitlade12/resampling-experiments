@@ -11,8 +11,8 @@ https://stackoverflow.com/questions/79748461/how-to-pass-pre-computed-folds-to-s
 
 import numpy as np
 from sklearn.base import clone
-from sklearn.metrics import log_loss, roc_auc_score, brier_score_loss
-from sklearn.model_selection import StratifiedKFold, ParameterSampler
+from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+from sklearn.model_selection import ParameterSampler, StratifiedKFold
 from sklearn.preprocessing import MinMaxScaler
 
 
@@ -105,7 +105,9 @@ def undersample_data(undersampler, X, y, scale):
     return xtrainu, ytrainu, xtest, ytest, Xu, yu, stats
 
 
-def train_model_w_undersampling(model, params, xtrainu, ytrainu, xtest, ytest, Xu, yu, scoring="roc_auc"):
+def train_model_w_undersampling(
+    model, params, xtrainu, ytrainu, xtest, ytest, Xu, yu, scoring="roc_auc"
+):
     """
     Tune and train a model on pre-undersampled data.
 

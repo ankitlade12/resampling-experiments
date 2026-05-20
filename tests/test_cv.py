@@ -1,7 +1,9 @@
 import pytest
 from sklearn.datasets import make_classification
 from sklearn.ensemble import RandomForestClassifier
+
 from functions.cv import train_model
+
 
 @pytest.fixture
 def classification_data():

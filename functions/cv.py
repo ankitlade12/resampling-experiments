@@ -14,13 +14,13 @@ def train_model(estimator, params, X_train, y_train, scoring="roc_auc", refit=Tr
     search = HalvingRandomSearchCV(
         estimator=estimator,
         param_distributions=params,
-        n_candidates="exhaust",      # the number of candidates to evaluate at the first iteration
-        factor=3,                    # only a third of the candidates are promoted
-        resource="n_estimators",     # the limiting resource
-        max_resources=1000,          # max number of trees (or samples)
-        min_resources=10,            # min number of trees (or samples)
-        scoring=scoring,             # proper scoring function (ensures probabilistic distribution)
-        cv=3,                        # uses StratifiedKFold by default
+        n_candidates="exhaust",  # the number of candidates to evaluate at the first iteration
+        factor=3,  # only a third of the candidates are promoted
+        resource="n_estimators",  # the limiting resource
+        max_resources=1000,  # max number of trees (or samples)
+        min_resources=10,  # min number of trees (or samples)
+        scoring=scoring,  # proper scoring function (ensures probabilistic distribution)
+        cv=3,  # uses StratifiedKFold by default
         random_state=10,
         refit=refit,
         n_jobs=-1,
@@ -30,7 +30,9 @@ def train_model(estimator, params, X_train, y_train, scoring="roc_auc", refit=Tr
     return search
 
 
-def train_basic_model(estimator, params, X_train, y_train, scoring="roc_auc", refit=True):
+def train_basic_model(
+    estimator, params, X_train, y_train, scoring="roc_auc", refit=True
+):
     """
     Train classifier with hyperparameter tuning
     using randomized search and without undersampling.

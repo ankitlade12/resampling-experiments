@@ -1,17 +1,18 @@
 import numpy as np
 from imblearn.metrics import geometric_mean_score
 from sklearn.metrics import (
+    average_precision_score,
     balanced_accuracy_score,
     brier_score_loss,
+    confusion_matrix_at_thresholds,
+    f1_score,
+    matthews_corrcoef,
     precision_recall_curve,
     precision_score,
     recall_score,
-    average_precision_score,
     roc_auc_score,
-    confusion_matrix_at_thresholds,
-    matthews_corrcoef,
-    f1_score,
 )
+
 
 def predict_class(y, prob):
     """
@@ -85,7 +86,18 @@ def evaluate_model_on_test_set(search, X, y):
     y = np.asarray(y)
     n = int(0.6 * len(X))
 
-    roc, ap, precision, recall, f1score, mcc, ba, brier, gmean, thresh = [], [], [], [], [], [], [], [], [], []
+    roc, ap, precision, recall, f1score, mcc, ba, brier, gmean, thresh = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
 
     for seed in range(1, 6):
         idx = np.random.default_rng(seed).choice(len(X), size=n, replace=True)

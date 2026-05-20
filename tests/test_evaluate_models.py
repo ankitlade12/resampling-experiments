@@ -1,7 +1,9 @@
 import pytest
 from sklearn.datasets import make_classification
 from sklearn.ensemble import RandomForestClassifier
+
 from functions.evaluation import evaluate_model_on_test_set
+
 
 @pytest.fixture
 def fitted_model():
@@ -74,8 +76,26 @@ def test_precision_recall_between_0_and_1(fitted_model, test_data):
 def test_output_order(fitted_model, test_data):
     X, y = test_data
     result = evaluate_model_on_test_set(fitted_model, X, y)
-    keys = ["roc", "roc_std", "ap", "ap_std", "precision", "precision_std",
-            "recall", "recall_std", "f1", "f1_std", "mcc", "mcc_std",
-            "ba", "ba_std", "brier", "brier_std", "gmean", "gmean_std",
-            "thresh", "thresh_std"]
+    keys = [
+        "roc",
+        "roc_std",
+        "ap",
+        "ap_std",
+        "precision",
+        "precision_std",
+        "recall",
+        "recall_std",
+        "f1",
+        "f1_std",
+        "mcc",
+        "mcc_std",
+        "ba",
+        "ba_std",
+        "brier",
+        "brier_std",
+        "gmean",
+        "gmean_std",
+        "thresh",
+        "thresh_std",
+    ]
     assert len(result) == len(keys)

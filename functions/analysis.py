@@ -22,11 +22,29 @@ def create_df(scores_dict, dataset, models):
         Missing values are filled with 0.
     """
     df = pd.DataFrame(
-      scores_dict[dataset],
-      index = ["roc", "roc_std", "ap", "ap_std", "precision", "precision_std",
-               "recall", "recall_std", "f1_score", "f1_std", "mcc", "mcc_std",
-               "ba", "ba_std", "brier", "brier_std", "gmean", "gmean_std",
-               "thresh", "tresh_std"],
+        scores_dict[dataset],
+        index=[
+            "roc",
+            "roc_std",
+            "ap",
+            "ap_std",
+            "precision",
+            "precision_std",
+            "recall",
+            "recall_std",
+            "f1_score",
+            "f1_std",
+            "mcc",
+            "mcc_std",
+            "ba",
+            "ba_std",
+            "brier",
+            "brier_std",
+            "gmean",
+            "gmean_std",
+            "thresh",
+            "tresh_std",
+        ],
     )
     df = df.T
     return df.loc[models].fillna(0)

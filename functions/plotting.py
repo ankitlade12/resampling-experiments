@@ -1,8 +1,9 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from sklearn.metrics import precision_recall_curve
 
 from functions.data import load_dataset
+
 
 def compute_ylim(means, stds, upper, lower, target_fraction=0.28):
     """
@@ -30,7 +31,9 @@ def _plot_metrics_on_ax(ax, y, probs, title=None):
     Draw precision, recall and F1 vs threshold on a given ax.
     """
     precision, recall, thresholds = precision_recall_curve(y, probs)
-    f1_scores = 2 * (precision[:-1] * recall[:-1]) / (precision[:-1] + recall[:-1] + 1e-9)
+    f1_scores = (
+        2 * (precision[:-1] * recall[:-1]) / (precision[:-1] + recall[:-1] + 1e-9)
+    )
 
     best_idx = np.argmax(f1_scores)
     best_threshold = thresholds[best_idx]
@@ -38,8 +41,13 @@ def _plot_metrics_on_ax(ax, y, probs, title=None):
     ax.plot(thresholds, precision[:-1], label="Precision", color="blue")
     ax.plot(thresholds, recall[:-1], label="Recall", color="red")
     ax.plot(thresholds, f1_scores, label="F1-Score", color="green")
-    ax.axvline(best_threshold, color="gray", linestyle="--", lw=1.5,
-               label=f"Threshold = {best_threshold:.2f}")
+    ax.axvline(
+        best_threshold,
+        color="gray",
+        linestyle="--",
+        lw=1.5,
+        label=f"Threshold = {best_threshold:.2f}",
+    )
 
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
@@ -68,7 +76,7 @@ def plot_metrics_vs_threshold_grid(datasets, models, load_model_fn, outputdir=No
 
         for j, model in enumerate(models):
             ax = axes[i, j]
-            #TODO: I am not sure it's going to work, I need to pass models dir here to load model
+            # TODO: I am not sure it's going to work, I need to pass models dir here to load model
             search = load_model_fn(dataset, model)
             probs = search.predict_proba(X_test)[:, 1]
 
@@ -81,8 +89,14 @@ def plot_metrics_vs_threshold_grid(datasets, models, load_model_fn, outputdir=No
 
     # single legend from the last ax
     handles, labels = axes[0, 0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=4, fontsize=10,
-               bbox_to_anchor=(0.5, -0.02))
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=4,
+        fontsize=10,
+        bbox_to_anchor=(0.5, -0.02),
+    )
 
     plt.suptitle("Precision, Recall and F1 vs Threshold", fontsize=14, y=1.01)
     plt.tight_layout()

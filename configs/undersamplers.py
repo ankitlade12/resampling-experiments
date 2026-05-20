@@ -4,16 +4,17 @@ This module provides various undersampling techniques for handling imbalanced da
 Each undersampler is configured with default parameters as described in their respective
 original articles.
 """
+
 from imblearn.under_sampling import (
-    RandomUnderSampler,
-    CondensedNearestNeighbour,
-    TomekLinks,
-    OneSidedSelection,
-    EditedNearestNeighbours,
-    RepeatedEditedNearestNeighbours,
     AllKNN,
-    NeighbourhoodCleaningRule,
+    CondensedNearestNeighbour,
+    EditedNearestNeighbours,
     NearMiss,
+    NeighbourhoodCleaningRule,
+    OneSidedSelection,
+    RandomUnderSampler,
+    RepeatedEditedNearestNeighbours,
+    TomekLinks,
 )
 
 rus = RandomUnderSampler(
