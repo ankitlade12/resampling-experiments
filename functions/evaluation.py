@@ -4,7 +4,6 @@ from sklearn.metrics import (
     average_precision_score,
     balanced_accuracy_score,
     brier_score_loss,
-    confusion_matrix_at_thresholds,
     f1_score,
     matthews_corrcoef,
     precision_recall_curve,
@@ -47,12 +46,12 @@ def predict_class(y, prob):
     return preds, best_threshold
 
 
-def calculate_mcc_ba_gmean(y, prob):
+def calculate_classif_metrics(y, prob):
     """
-    Get the best value of MCC.
+    Get the best value of various classification metrics.
     """
     # Get relevant thresholds
-    _, _, _, _, thresholds = confusion_matrix_at_thresholds(y, prob)
+    thresholds = np.unique(prob)
     mcc_ls = [matthews_corrcoef(y, prob >= t) for t in thresholds]
     ba_ls = [balanced_accuracy_score(y, prob >= t) for t in thresholds]
     g_mean = [geometric_mean_score(y, prob >= t) for t in thresholds]
@@ -110,7 +109,7 @@ def evaluate_model_on_test_set(search, X, y):
         precision.append(precision_score(ys, preds))
         recall.append(recall_score(ys, preds))
         f1score.append(f1_score(ys, preds))
-        mcc_val, ba_val, gmean_val = calculate_mcc_ba_gmean(ys, prob)
+        mcc_val, ba_val, gmean_val = calculate_classif_metrics(ys, prob)
         mcc.append(mcc_val)
         ba.append(ba_val)
         gmean.append(gmean_val)
