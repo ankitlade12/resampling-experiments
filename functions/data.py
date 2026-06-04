@@ -57,6 +57,7 @@ DATASETS_SEPARABLE = [
 
 DATASETS_FOR_ANALYSIS = [data for data in DATASETS_LS if data not in DATASETS_SEPARABLE]
 
+
 def load_dataset(dataset):
     if dataset in DATASETS_KEEL:
         # load dataset from keel
