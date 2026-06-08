@@ -2,10 +2,18 @@ from sklearn.experimental import enable_halving_search_cv
 from sklearn.model_selection import HalvingRandomSearchCV, RandomizedSearchCV
 
 
-def train_model(estimator, params, X_train, y_train, scoring="roc_auc", refit=True):
+def train_model(
+    estimator, params, X_train, y_train, scoring="roc_auc", refit=True, n_jobs=-1
+):
     """
     Train classifier with hyperparameter tuning
     using successive halving and without undersampling.
+
+    ``n_jobs`` controls the parallelism of the search itself (defaults to -1, all
+    cores). Set ``n_jobs=1`` to run the candidate search sequentially; this avoids
+    a nested-parallelism deadlock that can occur on macOS when the search workers
+    and a parallel estimator both spawn joblib/loky processes. It does not change
+    the fitted models, only how they are scheduled.
     """
 
     # CatBoostClassifier does not recognize n_estimators as hyperparameter.
@@ -23,7 +31,7 @@ def train_model(estimator, params, X_train, y_train, scoring="roc_auc", refit=Tr
         cv=3,  # uses StratifiedKFold by default
         random_state=10,
         refit=refit,
-        n_jobs=-1,
+        n_jobs=n_jobs,
     )
 
     search.fit(X_train, y_train)
