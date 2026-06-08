@@ -1,14 +1,17 @@
 catboost>=1.2.10
 feature_engine>=1.8.3
-imblearn>=1.8.3
+imbalanced-learn>=0.14
 joblib>=1.5.3
 keel_ds>=0.2.4
 lightgbm>=4.6.0
+matplotlib>=3.8
 numpy>=2.4.4
+pandas>=2.0
 scipy>=1.17.1
 setuptools>=82.0.1
 scikit_learn>=1.6.1
 tqdm>=4.0.0
+ucimlrepo>=0.0.7
 xgboost>=3.2.0
 
 # testing and maintenance
