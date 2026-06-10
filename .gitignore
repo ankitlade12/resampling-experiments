@@ -19,3 +19,8 @@ catboost_info/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+
+# local dataset cache (ucimlrepo / direct downloads)
+.data_cache/
+.venv/
+models/

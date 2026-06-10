@@ -1,11 +1,8 @@
 import numpy as np
-from imblearn.metrics import geometric_mean_score
 from sklearn.metrics import (
     average_precision_score,
-    balanced_accuracy_score,
     brier_score_loss,
     f1_score,
-    matthews_corrcoef,
     precision_recall_curve,
     precision_score,
     recall_score,
@@ -49,13 +46,49 @@ def predict_class(y, prob):
 def calculate_classif_metrics(y, prob):
     """
     Get the best value of various classification metrics.
+
+    Returns the maximum of Matthews correlation coefficient, balanced accuracy
+    and geometric mean over all decision thresholds (each unique predicted
+    probability, with samples scored positive when ``prob >= threshold``).
+
+    This is a vectorized equivalent of looping over ``np.unique(prob)`` and
+    calling the scikit-learn / imbalanced-learn scorers at each threshold: the
+    confusion-matrix counts at every threshold are obtained from cumulative sums
+    of the probability-sorted labels, which is O(n log n) instead of O(n^2) and
+    matters on large test sets where boosting models produce many distinct
+    probabilities. The returned maxima are numerically identical to the loop.
     """
-    # Get relevant thresholds
-    thresholds = np.unique(prob)
-    mcc_ls = [matthews_corrcoef(y, prob >= t) for t in thresholds]
-    ba_ls = [balanced_accuracy_score(y, prob >= t) for t in thresholds]
-    g_mean = [geometric_mean_score(y, prob >= t) for t in thresholds]
-    return max(mcc_ls), max(ba_ls), max(g_mean)
+    y = np.asarray(y).astype(int)
+    prob = np.asarray(prob, dtype="float64")
+    n_pos = int(y.sum())
+    n_neg = y.shape[0] - n_pos
+
+    # Sort by descending probability so that, as the threshold is lowered, each
+    # sample is added to the positive predictions exactly once.
+    order = np.argsort(-prob, kind="mergesort")
+    y_sorted = y[order]
+    prob_sorted = prob[order]
+
+    tp_cum = np.cumsum(y_sorted)
+    fp_cum = np.cumsum(1 - y_sorted)
+
+    # Evaluate only at distinct probabilities: keep the last index of each run of
+    # equal values, where every sample with prob >= that value has been counted.
+    last_of_run = np.r_[np.diff(prob_sorted) != 0, True]
+    tp = tp_cum[last_of_run].astype("float64")
+    fp = fp_cum[last_of_run].astype("float64")
+    fn = n_pos - tp
+    tn = n_neg - fp
+
+    denom = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    mcc = np.divide(tp * tn - fp * fn, denom, out=np.zeros_like(tp), where=denom > 0)
+
+    tpr = tp / n_pos if n_pos else np.zeros_like(tp)
+    tnr = tn / n_neg if n_neg else np.zeros_like(tn)
+    ba = (tpr + tnr) / 2
+    g_mean = np.sqrt(tpr * tnr)
+
+    return float(mcc.max()), float(ba.max()), float(g_mean.max())
 
 
 def evaluate_model_on_test_set(search, X, y):
