@@ -1,6 +1,46 @@
 import numpy as np
+from sklearn.base import clone
 from sklearn.experimental import enable_halving_search_cv
-from sklearn.model_selection import HalvingRandomSearchCV, RandomizedSearchCV
+from sklearn.model_selection import HalvingRandomSearchCV, RandomizedSearchCV, StratifiedKFold
+
+from functions.evaluation import select_f1_threshold
+
+
+def _subset(data, indices):
+    """Index pandas or numpy inputs without discarding feature metadata."""
+    return data.iloc[indices] if hasattr(data, "iloc") else data[indices]
+
+
+def _oof_threshold(estimator, X, y, sample_weight=None):
+    """Learn a decision threshold from training-only OOF scores."""
+    y_array = np.asarray(y)
+    oof_prob = np.empty(len(y_array), dtype="float64")
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=10)
+
+    for train_idx, valid_idx in cv.split(X, y_array):
+        fold_model = clone(estimator)
+        fit_kwargs = {}
+        if sample_weight is not None:
+            fit_kwargs["sample_weight"] = np.asarray(sample_weight)[train_idx]
+        fold_model.fit(
+            _subset(X, train_idx),
+            y_array[train_idx],
+            **fit_kwargs,
+        )
+        oof_prob[valid_idx] = fold_model.predict_proba(_subset(X, valid_idx))[:, 1]
+
+    return select_f1_threshold(y_array, oof_prob)
+
+
+def _attach_oof_threshold(container, estimator, X, y, sample_weight=None):
+    container.decision_threshold_ = _oof_threshold(
+        estimator, X, y, sample_weight=sample_weight
+    )
+    container.threshold_selection_ = {
+        "metric": "f1",
+        "source": "3-fold out-of-fold training predictions",
+        "random_state": 10,
+    }
 
 
 def get_sample_weights(y_train):
@@ -48,7 +88,7 @@ def train_model(
         resource="n_estimators",  # the limiting resource
         max_resources=1000,  # max number of trees (or samples)
         min_resources=10,  # min number of trees (or samples)
-        scoring=scoring,  # proper scoring function (ensures probabilistic distribution)
+        scoring=scoring,
         cv=3,  # uses StratifiedKFold by default
         random_state=10,
         refit=refit,
@@ -62,6 +102,13 @@ def train_model(
         search.fit(X_train, y_train, sample_weight=sample_weight)
     else:
         search.fit(X_train, y_train)
+    _attach_oof_threshold(
+        search,
+        search.best_estimator_,
+        X_train,
+        y_train,
+        sample_weight=sample_weight,
+    )
     return search
 
 
@@ -85,4 +132,5 @@ def train_basic_model(
     )
 
     search.fit(X_train, y_train)
+    _attach_oof_threshold(search, search.best_estimator_, X_train, y_train)
     return search

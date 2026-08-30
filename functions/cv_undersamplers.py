@@ -15,6 +15,8 @@ from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 from sklearn.model_selection import ParameterSampler, StratifiedKFold
 from sklearn.preprocessing import MinMaxScaler
 
+from functions.evaluation import select_f1_threshold
+
 
 def undersample_data(undersampler, X, y, scale):
     """
@@ -176,6 +178,8 @@ def train_model_w_undersampling(
     results_r2 = []
     for params_, _ in top10:
         fold_scores = []
+        fold_truth = []
+        fold_probabilities = []
         temp_params = params_.copy()
         temp_params["n_estimators"] = 300
 
@@ -184,6 +188,8 @@ def train_model_w_undersampling(
             clf.set_params(**temp_params)
             clf.fit(xtrainu[i], ytrainu[i])
             y_pred = clf.predict_proba(xtest[i])[:, 1]
+            fold_truth.append(np.asarray(ytest[i]))
+            fold_probabilities.append(y_pred)
 
             if scoring == "log_loss":
                 fold_scores.append(log_loss(ytest[i], y_pred))
@@ -193,13 +199,24 @@ def train_model_w_undersampling(
                 fold_scores.append(brier_score_loss(ytest[i], y_pred))
 
         avg_score = np.mean(fold_scores)
-        results_r2.append((params_, avg_score))
+        results_r2.append(
+            (
+                params_,
+                avg_score,
+                np.concatenate(fold_truth),
+                np.concatenate(fold_probabilities),
+            )
+        )
 
     # Select best configuration
     if scoring == "roc_auc":
-        best_params, best_score = max(results_r2, key=lambda x: x[1])
+        best_params, best_score, best_y_oof, best_prob_oof = max(
+            results_r2, key=lambda x: x[1]
+        )
     else:
-        best_params, best_score = min(results_r2, key=lambda x: x[1])
+        best_params, best_score, best_y_oof, best_prob_oof = min(
+            results_r2, key=lambda x: x[1]
+        )
 
     # --- Final refit with n_estimators=800 on full undersampled data ---
     best_params_final = best_params.copy()
@@ -208,5 +225,11 @@ def train_model_w_undersampling(
     model = clone(model)
     model.set_params(**best_params_final)
     model.fit(Xu, yu)
+    model.decision_threshold_ = select_f1_threshold(best_y_oof, best_prob_oof)
+    model.threshold_selection_ = {
+        "metric": "f1",
+        "source": "3-fold out-of-fold training predictions",
+        "random_state": 10,
+    }
 
     return model

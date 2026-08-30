@@ -1,9 +1,10 @@
 """
 Evaluate IHT-undersampling models trained on the new datasets.
 
-Loads each model saved by train-iht-new.py, evaluates it on the test set with
-bootstrapped samples (metrics at the optimal threshold), and stores one results
-pickle per IHT threshold in models/iht-new/ (matching evaluate-iht.py).
+Loads each model saved by train-iht-new.py, evaluates it on the test set at the
+training-derived frozen threshold with bootstrap confidence intervals, and
+stores one results pickle per IHT threshold in models/iht-new/ (matching
+evaluate-iht.py).
 """
 
 import pickle
@@ -41,7 +42,14 @@ for undersampler in tqdm(IHT_VERSIONS, desc="IHT versions"):
     scores_dict = {}
 
     for dataset, loader in LOADERS.items():
-        _, X_test, _, y_test = loader(dataset)
+        if loader is load_hard_dataset:
+            _, X_test, _, y_test, metadata = loader(
+                dataset, return_metadata=True
+            )
+            groups = metadata["test_groups"]
+        else:
+            _, X_test, _, y_test = loader(dataset)
+            groups = None
 
         scores_dict[dataset] = {}
         for estimator in estimator_dict:
@@ -49,7 +57,12 @@ for undersampler in tqdm(IHT_VERSIONS, desc="IHT versions"):
                 MODELS_DIR / f"{dataset}_{estimator}_{undersampler}.pkl"
             )
             scores_dict[dataset][f"{estimator}_{undersampler}"] = (
-                evaluate_model_on_test_set(model, X_test, y_test)
+                evaluate_model_on_test_set(
+                    model,
+                    X_test,
+                    y_test,
+                    groups=groups,
+                )
             )
 
     with open(MODELS_DIR / f"results_{undersampler}", "wb") as fp:

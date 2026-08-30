@@ -2,8 +2,9 @@
 Evaluate pre-trained ensemble classifiers on the *hard* imbalanced datasets.
 
 Loads each model saved by train-ensembles-hard.py, evaluates it on the test set
-using bootstrapped samples (metrics at their optimal threshold), and stores the
-results as a pickle in the model folder.
+at the training-derived frozen threshold, with bootstrap confidence intervals,
+and stores the results as a pickle in the model folder. Diabetes confidence
+intervals use patient-cluster resampling.
 """
 
 import pickle
@@ -29,14 +30,19 @@ MODELS_DIR = REPO_ROOT / "models" / "ensembles-hard"
 scores_dict = {}
 
 for dataset in tqdm(DATASETS_HARD, desc="Datasets"):
-    _, X_test, _, y_test = load_hard_dataset(dataset)
+    _, X_test, _, y_test, metadata = load_hard_dataset(
+        dataset, return_metadata=True
+    )
 
     scores_dict[dataset] = {}
 
     for estimator in tqdm(estimator_dict, desc=dataset, leave=False):
         search = joblib.load(MODELS_DIR / f"{dataset}_{estimator}.pkl")
         scores_dict[dataset][estimator] = evaluate_model_on_test_set(
-            search, X_test, y_test
+            search,
+            X_test,
+            y_test,
+            groups=metadata["test_groups"],
         )
 
 with open(MODELS_DIR / "results", "wb") as fp:

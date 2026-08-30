@@ -75,13 +75,11 @@ def test_create_df_models_as_index(sample_scores_dict):
     assert list(df.index) == models, f"Expected index {models}, got {list(df.index)}"
 
 
-def test_create_df_fillna(sample_scores_dict):
+def test_create_df_rejects_missing_values(sample_scores_dict):
     # Introduce a NaN manually
     sample_scores_dict["dataset1"]["logit"]["roc"] = None
-    df = create_df(sample_scores_dict, "dataset1", ["logit"])
-    assert (
-        df.isnull().sum().sum() == 0
-    ), f"Expected no NaN values, got {df.isnull().sum().sum()} NaNs"
+    with pytest.raises(ValueError, match="Missing evaluation values"):
+        create_df(sample_scores_dict, "dataset1", ["logit"])
 
 
 def test_create_df_missing_model(sample_scores_dict):

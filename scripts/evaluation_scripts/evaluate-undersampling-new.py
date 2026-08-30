@@ -2,7 +2,8 @@
 Evaluate the undersampling models trained on the new datasets.
 
 Loads each model saved by train-undersampling-new.py, evaluates it on the test
-set with bootstrapped samples (metrics at the optimal threshold), and stores a
+set at the training-derived frozen threshold with bootstrap confidence
+intervals, and stores a
 merged results pickle in models/undersampling-new/, keyed by dataset then by
 ``{estimator}_{undersampler}`` (matching evaluate-undersampling.py).
 
@@ -56,7 +57,12 @@ MODELS_DIR = REPO_ROOT / "models" / "undersampling-new"
 scores_dict = {}
 
 for dataset, loader, undersamplers in tqdm(DATASETS, desc="Datasets"):
-    _, X_test, _, y_test = loader(dataset)
+    if loader is load_hard_dataset:
+        _, X_test, _, y_test, metadata = loader(dataset, return_metadata=True)
+        groups = metadata["test_groups"]
+    else:
+        _, X_test, _, y_test = loader(dataset)
+        groups = None
 
     scores_dict[dataset] = {}
     for undersampler in undersamplers:
@@ -65,7 +71,12 @@ for dataset, loader, undersamplers in tqdm(DATASETS, desc="Datasets"):
                 MODELS_DIR / f"{dataset}_{estimator}_{undersampler}.pkl"
             )
             scores_dict[dataset][f"{estimator}_{undersampler}"] = (
-                evaluate_model_on_test_set(model, X_test, y_test)
+                evaluate_model_on_test_set(
+                    model,
+                    X_test,
+                    y_test,
+                    groups=groups,
+                )
             )
 
 with open(MODELS_DIR / "results", "wb") as fp:
