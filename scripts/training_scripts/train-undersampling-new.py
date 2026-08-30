@@ -38,22 +38,13 @@ import joblib
 from tqdm import tqdm
 
 from configs.ensemble_models import estimator_dict
+from configs.experiment import HALVING_CANDIDATES, HALVING_RESOURCES, PROTOCOL_VERSION
 from configs.hyperparams import hyperparam_ensemble_dict
-from configs.undersamplers import (
-    allknn,
-    cnn,
-    enn,
-    ncr,
-    nm1,
-    nm2,
-    oss,
-    renn,
-    rus,
-    tomek,
-)
+from configs.undersamplers import allknn, cnn, enn, ncr, nm1, nm2, oss, renn, rus, tomek
 from functions.cv_undersamplers import train_model_w_undersampling, undersample_data
 from functions.hard_data import load_hard_dataset
 from functions.imbalanced_data import load_imbalanced_dataset
+from functions.provenance import fingerprint_dataset, initialize_run, register_dataset
 
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -88,6 +79,20 @@ DATASETS = [
 
 OUTPUT_DIR = REPO_ROOT / "models" / "undersampling-new"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+MANIFEST_PATH = initialize_run(
+    OUTPUT_DIR,
+    {
+        "protocol_version": PROTOCOL_VERSION,
+        "script": Path(__file__).name,
+        "datasets": [name for name, _, _ in DATASETS],
+        "samplers": list(SAMPLERS),
+        "estimators": list(estimator_dict),
+        "scoring": "roc_auc",
+        "halving_candidates": HALVING_CANDIDATES,
+        "halving_resources": HALVING_RESOURCES,
+    },
+    REPO_ROOT,
+)
 
 # Resume: reuse any (dataset, undersampler) already trained in a previous run, so
 # a fresh checkout trains everything while a re-run only fills what is missing.
@@ -109,6 +114,11 @@ for dataset, loader, undersamplers in tqdm(DATASETS, desc="Datasets"):
     if not todo:
         continue
     X_train, X_test, y_train, y_test = loader(dataset)
+    register_dataset(
+        MANIFEST_PATH,
+        dataset,
+        fingerprint_dataset(X_train, y_train, X_test, y_test),
+    )
 
     for name in tqdm(todo, desc=dataset, leave=False):
         sampler, scale = SAMPLERS[name]
