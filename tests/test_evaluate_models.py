@@ -7,6 +7,7 @@ from functions.evaluation import (
     METRIC_NAMES,
     evaluate_model_on_test_set,
     evaluate_predictions,
+    paired_bootstrap_difference,
     select_f1_threshold,
 )
 
@@ -89,3 +90,41 @@ def test_bootstrap_requires_enough_replicates(test_data):
     prob = np.full(len(y), 0.5)
     with pytest.raises(ValueError, match="at least 100"):
         evaluate_predictions(y, prob, 0.5, n_bootstrap=5)
+
+
+def test_paired_bootstrap_uses_candidate_benefit_direction():
+    y = np.array([0, 1] * 100)
+    strong = np.where(y == 1, 0.9, 0.1)
+    weak = np.full(len(y), 0.5)
+
+    roc = paired_bootstrap_difference(
+        y, weak, strong, 0.5, 0.5, metric="roc", n_bootstrap=100
+    )
+    brier = paired_bootstrap_difference(
+        y, weak, strong, 0.5, 0.5, metric="brier", n_bootstrap=100
+    )
+
+    assert roc["difference"] > 0
+    assert roc["ci_low"] > 0
+    assert brier["difference"] > 0
+    assert brier["ci_low"] > 0
+
+
+def test_paired_cluster_bootstrap_preserves_pairing():
+    y = np.array([0, 1, 0, 1] * 30)
+    groups = np.repeat(np.arange(60), 2)
+    prob = np.linspace(0.1, 0.9, len(y))
+
+    result = paired_bootstrap_difference(
+        y,
+        prob,
+        prob.copy(),
+        0.5,
+        0.5,
+        groups=groups,
+        n_bootstrap=100,
+    )
+
+    assert result["difference"] == 0
+    assert result["ci_low"] == 0
+    assert result["ci_high"] == 0

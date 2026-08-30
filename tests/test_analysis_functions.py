@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from functions.analysis import create_df
+from functions.analysis import create_df, holm_adjust
 
 
 @pytest.fixture
@@ -67,6 +67,16 @@ def test_create_df_columns(sample_scores_dict):
         "tresh_std",
     ]
     assert list(df.columns) == expected_cols
+
+
+def test_holm_adjust_preserves_order_and_controls_family():
+    adjusted = holm_adjust([0.01, 0.04, 0.03])
+    assert adjusted.tolist() == pytest.approx([0.03, 0.06, 0.06])
+
+
+def test_holm_adjust_rejects_invalid_pvalues():
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        holm_adjust([0.2, float("nan")])
 
 
 def test_create_df_models_as_index(sample_scores_dict):

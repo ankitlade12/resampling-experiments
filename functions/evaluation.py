@@ -173,6 +173,79 @@ def bootstrap_metric_intervals(
     return intervals
 
 
+def paired_bootstrap_difference(
+    y,
+    reference_prob,
+    candidate_prob,
+    reference_threshold,
+    candidate_threshold,
+    *,
+    metric="roc",
+    groups=None,
+    n_bootstrap=1000,
+    confidence_level=0.95,
+    random_state=0,
+):
+    """Estimate a candidate-versus-reference effect with paired resampling.
+
+    The same test rows or clusters are selected for both models in every
+    replicate. Positive differences always favor the candidate; Brier loss is
+    therefore ``reference - candidate`` while all other metrics use
+    ``candidate - reference``.
+    """
+    if metric not in METRIC_NAMES:
+        raise ValueError(f"metric must be one of {METRIC_NAMES}.")
+    if n_bootstrap < 100:
+        raise ValueError("n_bootstrap must be at least 100 for stable intervals.")
+    if not 0 < confidence_level < 1:
+        raise ValueError("confidence_level must be between 0 and 1.")
+
+    y = np.asarray(y).astype(int)
+    reference_prob = np.asarray(reference_prob, dtype="float64")
+    candidate_prob = np.asarray(candidate_prob, dtype="float64")
+    if not len(y) == len(reference_prob) == len(candidate_prob):
+        raise ValueError("y and both probability arrays must have equal length.")
+    if groups is not None and len(groups) != len(y):
+        raise ValueError("groups must have the same length as y.")
+
+    def effect(indices):
+        reference = _calculate_metrics(
+            y[indices], reference_prob[indices], reference_threshold
+        )[metric]
+        candidate = _calculate_metrics(
+            y[indices], candidate_prob[indices], candidate_threshold
+        )[metric]
+        return reference - candidate if metric == "brier" else candidate - reference
+
+    point = effect(np.arange(len(y)))
+    rng = np.random.default_rng(random_state)
+    members = _cluster_members(groups) if groups is not None else None
+    differences = []
+
+    for _ in range(n_bootstrap):
+        indices = (
+            _stratified_bootstrap_indices(y, rng)
+            if groups is None
+            else _cluster_bootstrap_indices(members, rng)
+        )
+        if np.unique(y[indices]).size < 2:
+            continue
+        differences.append(effect(indices))
+
+    if not differences:
+        raise ValueError("No valid paired bootstrap replicates.")
+    alpha = (1 - confidence_level) / 2
+    low, high = np.quantile(differences, [alpha, 1 - alpha])
+    return {
+        "metric": metric,
+        "difference": float(point),
+        "ci_low": float(low),
+        "ci_high": float(high),
+        "positive_favors": "candidate",
+        "n_bootstrap_valid": len(differences),
+    }
+
+
 def evaluate_predictions(
     y,
     prob,

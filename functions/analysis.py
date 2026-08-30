@@ -26,6 +26,25 @@ LEGACY_METRICS = [
 ]
 
 
+def holm_adjust(p_values):
+    """Adjust a pre-specified family of p-values with Holm's procedure."""
+    values = pd.Series(p_values, dtype="float64")
+    if values.isna().any() or ((values < 0) | (values > 1)).any():
+        raise ValueError("p-values must be finite values between 0 and 1.")
+
+    order = values.sort_values().index
+    m = len(values)
+    adjusted_sorted = []
+    running_max = 0.0
+    for rank, index in enumerate(order):
+        running_max = max(running_max, (m - rank) * values.loc[index])
+        adjusted_sorted.append(min(1.0, running_max))
+
+    adjusted = pd.Series(index=values.index, dtype="float64")
+    adjusted.loc[order] = adjusted_sorted
+    return adjusted
+
+
 def create_df(scores_dict, dataset, models):
     """
     Create a DataFrame of evaluation scores for a given dataset and set of models.

@@ -3,6 +3,15 @@ from sklearn.base import clone
 from sklearn.experimental import enable_halving_search_cv
 from sklearn.model_selection import HalvingRandomSearchCV, RandomizedSearchCV, StratifiedKFold
 
+from configs.experiment import (
+    CV_RANDOM_STATE,
+    CV_SPLITS,
+    HALVING_FACTOR,
+    HALVING_MAX_RESOURCES,
+    HALVING_MIN_RESOURCES,
+    PARAMETER_RANDOM_STATE,
+    THRESHOLD_METRIC,
+)
 from functions.evaluation import select_f1_threshold
 
 
@@ -15,7 +24,9 @@ def _oof_threshold(estimator, X, y, sample_weight=None):
     """Learn a decision threshold from training-only OOF scores."""
     y_array = np.asarray(y)
     oof_prob = np.empty(len(y_array), dtype="float64")
-    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=10)
+    cv = StratifiedKFold(
+        n_splits=CV_SPLITS, shuffle=True, random_state=CV_RANDOM_STATE
+    )
 
     for train_idx, valid_idx in cv.split(X, y_array):
         fold_model = clone(estimator)
@@ -37,9 +48,9 @@ def _attach_oof_threshold(container, estimator, X, y, sample_weight=None):
         estimator, X, y, sample_weight=sample_weight
     )
     container.threshold_selection_ = {
-        "metric": "f1",
-        "source": "3-fold out-of-fold training predictions",
-        "random_state": 10,
+        "metric": THRESHOLD_METRIC,
+        "source": f"{CV_SPLITS}-fold out-of-fold training predictions",
+        "random_state": CV_RANDOM_STATE,
     }
 
 
@@ -84,13 +95,17 @@ def train_model(
         estimator=estimator,
         param_distributions=params,
         n_candidates="exhaust",  # the number of candidates to evaluate at the first iteration
-        factor=3,  # only a third of the candidates are promoted
+        factor=HALVING_FACTOR,
         resource="n_estimators",  # the limiting resource
-        max_resources=1000,  # max number of trees (or samples)
-        min_resources=10,  # min number of trees (or samples)
+        max_resources=HALVING_MAX_RESOURCES,
+        min_resources=HALVING_MIN_RESOURCES,
         scoring=scoring,
-        cv=3,  # uses StratifiedKFold by default
-        random_state=10,
+        cv=StratifiedKFold(
+            n_splits=CV_SPLITS,
+            shuffle=True,
+            random_state=CV_RANDOM_STATE,
+        ),
+        random_state=PARAMETER_RANDOM_STATE,
         refit=refit,
         n_jobs=n_jobs,
     )
@@ -125,8 +140,12 @@ def train_basic_model(
         param_distributions=params,
         n_iter=20,
         scoring=scoring,
-        cv=3,
-        random_state=10,
+        cv=StratifiedKFold(
+            n_splits=CV_SPLITS,
+            shuffle=True,
+            random_state=CV_RANDOM_STATE,
+        ),
+        random_state=PARAMETER_RANDOM_STATE,
         refit=refit,
         n_jobs=-1,
     )

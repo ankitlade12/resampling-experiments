@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 import joblib
+import numpy as np
 from tqdm import tqdm
 
 from configs.ensemble_models import estimator_dict
@@ -55,6 +56,7 @@ DATASETS = [
 MODELS_DIR = REPO_ROOT / "models" / "undersampling-new"
 
 scores_dict = {}
+predictions_dict = {}
 
 for dataset, loader, undersamplers in tqdm(DATASETS, desc="Datasets"):
     if loader is load_hard_dataset:
@@ -65,6 +67,11 @@ for dataset, loader, undersamplers in tqdm(DATASETS, desc="Datasets"):
         groups = None
 
     scores_dict[dataset] = {}
+    predictions_dict[dataset] = {
+        "y": np.asarray(y_test),
+        "groups": None if groups is None else np.asarray(groups),
+        "models": {},
+    }
     for undersampler in undersamplers:
         for estimator in estimator_dict:
             model = joblib.load(
@@ -78,6 +85,13 @@ for dataset, loader, undersamplers in tqdm(DATASETS, desc="Datasets"):
                     groups=groups,
                 )
             )
+            predictions_dict[dataset]["models"][f"{estimator}_{undersampler}"] = {
+                "probability": model.predict_proba(X_test)[:, 1],
+                "threshold": model.decision_threshold_,
+            }
 
 with open(MODELS_DIR / "results", "wb") as fp:
     pickle.dump(scores_dict, fp)
+
+with open(MODELS_DIR / "predictions", "wb") as fp:
+    pickle.dump(predictions_dict, fp)
