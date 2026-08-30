@@ -30,7 +30,7 @@ X_train, X_test, y_train, y_test = load_hard_dataset("diabetes130")
 
 | Name | Source | License | Instances | Features | Positive class | Positive rate |
 |------|--------|---------|-----------|----------|----------------|---------------|
-| `diabetes130` | UCI id 296 — Diabetes 130-US hospitals (1999-2008) | CC BY 4.0 | 101,766 | 47 | Readmitted within 30 days (`<30`) | ~11% |
+| `diabetes130` | UCI id 296 — Diabetes 130-US hospitals (1999-2008) | CC BY 4.0 | 99,343 eligible encounters | 45 model features | Readmitted within 30 days (`<30`) | ~11% |
 | `default_credit` | UCI id 350 — Default of Credit Card Clients | CC BY 4.0 | 30,000 | 23 | Defaults next month | ~22% |
 | `secom` | UCI id 179 — SECOM | CC BY 4.0 | 1,567 | 590 | Manufacturing failure | ~6.6% |
 
@@ -39,9 +39,15 @@ X_train, X_test, y_train, y_test = load_hard_dataset("diabetes130")
   clinically meaningful, imbalanced binarisation: positive = readmitted within
   30 days (`<30`); negative = everything else. This is the single standard
   framing of the problem, not an arbitrary class split.
+- **Cohort and split**: death/hospice discharge dispositions are excluded because
+  those encounters are not eligible for an ordinary readmission outcome. The
+  remaining encounters are split by `patient_nbr`, so every patient's complete
+  history is assigned to either train or test and never both. Identifiers are
+  removed only after the split is created.
 - **Preprocessing**: 36 categorical columns are arbitrary ordinal-encoded;
-  missing values are kept as an explicit `"Missing"` category; 2 constant
-  columns (`examide`, `citoglipton`) are dropped.
+  missing values are kept as an explicit `"Missing"` category; constant columns
+  are dropped. The encoder and selector are fit on training data only; unseen
+  test categories receive the encoder's reserved unseen value.
 - **Why hard**: 30-day readmission is weakly predictable from administrative and
   diagnostic features; published models report ROC-AUC ~0.64-0.70.
 
@@ -56,10 +62,11 @@ X_train, X_test, y_train, y_test = load_hard_dataset("diabetes130")
 - **Target**: pass (`-1`) / fail (`1`) re-encoded to 0/1 (same convention as the
   imbalanced-learn datasets in `functions/data.py`).
 - **Preprocessing**: 590 numeric sensor signals; missing values are flagged out
-  of sample (EndTailImputer at 3x the feature maximum) rather than imputed with a
-  central value, so tree models can use "not measured" as a signal; constant
-  signals are dropped. Missingness is mixed: most sensors are <5% missing
-  (sporadic) but ~28 are >=50% missing (structural).
+  of sample (EndTailImputer at 3x the training feature maximum) rather than
+  imputed with a central value, so tree models can use "not measured" as a
+  signal; constant signals are dropped. Both transformations are learned only
+  from the training partition. Missingness is mixed: most sensors are <5%
+  missing (sporadic) but ~28 are >=50% missing (structural).
 - **Why hard**: most sensors are uninformative noise and the failure rate is
   very low (~6.6%); achievable ROC-AUC is typically ~0.60-0.70.
 
