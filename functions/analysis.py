@@ -1,4 +1,48 @@
 import pandas as pd
+import warnings
+
+
+LEGACY_METRICS = [
+    "roc",
+    "roc_std",
+    "ap",
+    "ap_std",
+    "precision",
+    "precision_std",
+    "recall",
+    "recall_std",
+    "f1_score",
+    "f1_std",
+    "mcc",
+    "mcc_std",
+    "ba",
+    "ba_std",
+    "brier",
+    "brier_std",
+    "gmean",
+    "gmean_std",
+    "thresh",
+    "tresh_std",
+]
+
+
+def holm_adjust(p_values):
+    """Adjust a pre-specified family of p-values with Holm's procedure."""
+    values = pd.Series(p_values, dtype="float64")
+    if values.isna().any() or ((values < 0) | (values > 1)).any():
+        raise ValueError("p-values must be finite values between 0 and 1.")
+
+    order = values.sort_values().index
+    m = len(values)
+    adjusted_sorted = []
+    running_max = 0.0
+    for rank, index in enumerate(order):
+        running_max = max(running_max, (m - rank) * values.loc[index])
+        adjusted_sorted.append(min(1.0, running_max))
+
+    adjusted = pd.Series(index=values.index, dtype="float64")
+    adjusted.loc[order] = adjusted_sorted
+    return adjusted
 
 
 def create_df(scores_dict, dataset, models):
@@ -19,35 +63,23 @@ def create_df(scores_dict, dataset, models):
     -------
     pd.DataFrame
         DataFrame with models as rows and evaluation metrics as columns.
-        Missing values are filled with 0.
+        Missing values are rejected so incomplete experiments cannot silently
+        appear as zero performance.
     """
-    df = pd.DataFrame(
-        scores_dict[dataset],
-        index=[
-            "roc",
-            "roc_std",
-            "ap",
-            "ap_std",
-            "precision",
-            "precision_std",
-            "recall",
-            "recall_std",
-            "f1_score",
-            "f1_std",
-            "mcc",
-            "mcc_std",
-            "ba",
-            "ba_std",
-            "brier",
-            "brier_std",
-            "gmean",
-            "gmean_std",
-            "thresh",
-            "tresh_std",
-        ],
-    )
-    df = df.T
-    return df.loc[models].fillna(0)
+    raw = scores_dict[dataset]
+    first = next(iter(raw.values()))
+    if isinstance(first, dict):
+        df = pd.DataFrame.from_dict(raw, orient="index")
+        if set(LEGACY_METRICS).issubset(df.columns):
+            df = df[LEGACY_METRICS]
+    else:
+        df = pd.DataFrame(raw, index=LEGACY_METRICS).T
+
+    result = df.loc[models]
+    if result.isna().any().any():
+        missing = result.columns[result.isna().any()].tolist()
+        raise ValueError(f"Missing evaluation values in columns: {missing}")
+    return result
 
 
 def best_performance_summary(
@@ -58,19 +90,15 @@ def best_performance_summary(
     factor = 3,
 ):
     """
-    Build a styled summary DataFrame comparing baseline models against their
-    best cost-sensitive learning (CSL) or resampled variant for a given metric.
+    Build an exploratory summary comparing baselines with their best variant.
 
     For each dataset and base model, finds the CSL/resampled variant with the highest
-    metric value, computes the difference, and applies conditional highlighting:
+    metric value and computes the descriptive difference. Variant selection in
+    this function uses evaluation results and therefore must not be interpreted
+    as confirmatory model selection or statistical significance:
     - Orange: the single highest metric value across all models for that dataset
       (in either the baseline or CSL/resampled column).
-    - Red: the CSL improvement exceeds `factor` times the standard deviation of
-      both the baseline and the CSL variant.
-    - Green: the CSL improvement exceeds 1 times the standard deviation of
-      both the baseline and the CSL variant, but not `factor` times.
-    - Yellow: the CSL improvement is positive but does not exceed 1 standard
-      deviation of both models.
+    - Yellow: the selected variant has a positive descriptive difference.
 
     Parameters
     ----------
@@ -84,8 +112,8 @@ def best_performance_summary(
     metric_std : str
         Name of the corresponding standard deviation column (e.g. 'roc_std').
     factor : int
-        Multiplier applied to the baseline std for the red threshold. Default is 3,
-        meaning red appears when the improvement exceeds 3 * std.
+        Deprecated and retained only for notebook compatibility. Standard
+        deviations are not used as significance thresholds.
 
     Returns
     -------
@@ -94,6 +122,13 @@ def best_performance_summary(
     """
 
     base_models = ["rf", "ada", "gbm", "cat", "lgbm", "xgb"]
+    warnings.warn(
+        "best_performance_summary selects variants on evaluation results and is "
+        "exploratory only. Select variants in nested training CV for final claims.",
+        UserWarning,
+        stacklevel=2,
+    )
+    higher_is_better = metric not in {"brier", "log_loss"}
 
     rows = []
     for data in datasets:
@@ -103,10 +138,15 @@ def best_performance_summary(
             base_val = df.loc[model, metric]
             base_std = df.loc[model, metric_std]
             variants = [m for m in all_models if m.startswith(model + "_")]
-            best_variant = max(variants, key=lambda v: df.loc[v, metric])
+            selector = max if higher_is_better else min
+            best_variant = selector(variants, key=lambda v: df.loc[v, metric])
             best_val = df.loc[best_variant, metric]
             best_std = df.loc[best_variant, metric_std]
-            diff = best_val - base_val
+            diff = (
+                best_val - base_val
+                if higher_is_better
+                else base_val - best_val
+            )
             rows.append(
                 {
                     "dataset": data,
@@ -127,22 +167,19 @@ def best_performance_summary(
     csl_idx = cols.index(f"best_csl_{metric}")
     diff_idx = cols.index(f"{metric}_diff")
 
-    dataset_max = (
-        result.groupby("dataset")[[metric, f"best_csl_{metric}"]].max().max(axis=1)
+    grouped_values = result.groupby("dataset")[[metric, f"best_csl_{metric}"]]
+    dataset_best = (
+        grouped_values.max().max(axis=1)
+        if higher_is_better
+        else grouped_values.min().min(axis=1)
     )
 
     def style_row(row):
         styles = [""] * len(row)
         diff = row[f"{metric}_diff"]
-        std = row[metric_std]
-        std_csl = row[f"best_csl_{metric_std}"]
-        if diff > factor * std and diff > factor * std_csl:
-            styles[diff_idx] = "background-color: red"
-        elif diff > std and diff > std_csl:
-            styles[diff_idx] = "background-color: lightgreen"
-        elif diff > 0:
+        if diff > 0:
             styles[diff_idx] = "background-color: yellow"
-        best = dataset_max[row["dataset"]]
+        best = dataset_best[row["dataset"]]
         if row[metric] == best:
             styles[base_idx] = "background-color: orange"
         elif row[f"best_csl_{metric}"] == best:

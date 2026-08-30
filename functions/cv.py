@@ -1,6 +1,77 @@
 import numpy as np
+from sklearn.base import clone
 from sklearn.experimental import enable_halving_search_cv
-from sklearn.model_selection import HalvingRandomSearchCV, RandomizedSearchCV
+from sklearn.model_selection import (
+    HalvingRandomSearchCV,
+    RandomizedSearchCV,
+    StratifiedKFold,
+)
+
+from configs.experiment import (
+    CV_RANDOM_STATE,
+    CV_SPLITS,
+    HALVING_FACTOR,
+    HALVING_MAX_RESOURCES,
+    HALVING_MIN_RESOURCES,
+    PARAMETER_RANDOM_STATE,
+    THRESHOLD_METRIC,
+)
+from functions.calibration import (
+    ProbabilityCalibratedClassifier,
+    calibrate_probability,
+    fit_sigmoid_calibrator,
+)
+from functions.evaluation import select_f1_threshold
+
+
+def _subset(data, indices):
+    """Index pandas or numpy inputs without discarding feature metadata."""
+    return data.iloc[indices] if hasattr(data, "iloc") else data[indices]
+
+
+def _oof_probabilities(estimator, X, y, sample_weight=None):
+    """Generate training-only out-of-fold positive-class probabilities."""
+    y_array = np.asarray(y)
+    oof_prob = np.empty(len(y_array), dtype="float64")
+    cv = StratifiedKFold(n_splits=CV_SPLITS, shuffle=True, random_state=CV_RANDOM_STATE)
+
+    for train_idx, valid_idx in cv.split(X, y_array):
+        fold_model = clone(estimator)
+        fit_kwargs = {}
+        if sample_weight is not None:
+            fit_kwargs["sample_weight"] = np.asarray(sample_weight)[train_idx]
+        fold_model.fit(
+            _subset(X, train_idx),
+            y_array[train_idx],
+            **fit_kwargs,
+        )
+        oof_prob[valid_idx] = fold_model.predict_proba(_subset(X, valid_idx))[:, 1]
+
+    return oof_prob
+
+
+def _attach_oof_threshold(container, estimator, X, y, sample_weight=None):
+    y_array = np.asarray(y).astype(int)
+    oof_probability = _oof_probabilities(estimator, X, y, sample_weight=sample_weight)
+    calibrator = fit_sigmoid_calibrator(oof_probability, y_array)
+    calibrated_oof = calibrate_probability(calibrator, oof_probability)
+    calibrated_estimator = ProbabilityCalibratedClassifier(estimator, calibrator)
+    calibrated_estimator.decision_threshold_ = select_f1_threshold(
+        y_array, calibrated_oof
+    )
+    calibrated_estimator.probability_calibration_ = {
+        "method": "sigmoid_on_logit",
+        "source": f"{CV_SPLITS}-fold out-of-fold training predictions",
+        "original_prevalence": float(y_array.mean()),
+    }
+    container.best_estimator_ = calibrated_estimator
+    container.decision_threshold_ = calibrated_estimator.decision_threshold_
+    container.probability_calibration_ = calibrated_estimator.probability_calibration_
+    container.threshold_selection_ = {
+        "metric": THRESHOLD_METRIC,
+        "source": f"{CV_SPLITS}-fold out-of-fold training predictions",
+        "random_state": CV_RANDOM_STATE,
+    }
 
 
 def get_sample_weights(y_train):
@@ -44,13 +115,17 @@ def train_model(
         estimator=estimator,
         param_distributions=params,
         n_candidates="exhaust",  # the number of candidates to evaluate at the first iteration
-        factor=3,  # only a third of the candidates are promoted
+        factor=HALVING_FACTOR,
         resource="n_estimators",  # the limiting resource
-        max_resources=1000,  # max number of trees (or samples)
-        min_resources=10,  # min number of trees (or samples)
-        scoring=scoring,  # proper scoring function (ensures probabilistic distribution)
-        cv=3,  # uses StratifiedKFold by default
-        random_state=10,
+        max_resources=HALVING_MAX_RESOURCES,
+        min_resources=HALVING_MIN_RESOURCES,
+        scoring=scoring,
+        cv=StratifiedKFold(
+            n_splits=CV_SPLITS,
+            shuffle=True,
+            random_state=CV_RANDOM_STATE,
+        ),
+        random_state=PARAMETER_RANDOM_STATE,
         refit=refit,
         n_jobs=n_jobs,
     )
@@ -62,6 +137,13 @@ def train_model(
         search.fit(X_train, y_train, sample_weight=sample_weight)
     else:
         search.fit(X_train, y_train)
+    _attach_oof_threshold(
+        search,
+        search.best_estimator_,
+        X_train,
+        y_train,
+        sample_weight=sample_weight,
+    )
     return search
 
 
@@ -78,11 +160,16 @@ def train_basic_model(
         param_distributions=params,
         n_iter=20,
         scoring=scoring,
-        cv=3,
-        random_state=10,
+        cv=StratifiedKFold(
+            n_splits=CV_SPLITS,
+            shuffle=True,
+            random_state=CV_RANDOM_STATE,
+        ),
+        random_state=PARAMETER_RANDOM_STATE,
         refit=refit,
         n_jobs=-1,
     )
 
     search.fit(X_train, y_train)
+    _attach_oof_threshold(search, search.best_estimator_, X_train, y_train)
     return search

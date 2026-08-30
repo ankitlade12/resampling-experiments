@@ -2,8 +2,9 @@
 Evaluate pre-trained special ensemble classifiers on the *hard* imbalanced datasets.
 
 Loads each model saved by train-special-ensembles-hard.py, evaluates it on the
-test set using bootstrapped samples (metrics at their optimal threshold), and
-stores the results as a pickle in the model folder.
+test set at the training-derived frozen threshold, with bootstrap confidence
+intervals, and stores the results as a pickle in the model folder. Diabetes
+confidence intervals use patient-cluster resampling.
 """
 
 import pickle
@@ -15,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 import joblib
+import numpy as np
 from tqdm import tqdm
 
 from configs.special_ensembles import estimator_dict
@@ -27,17 +29,33 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 MODELS_DIR = REPO_ROOT / "models" / "special-ensembles-hard"
 
 scores_dict = {}
+predictions_dict = {}
 
 for dataset in tqdm(DATASETS_HARD, desc="Datasets"):
-    _, X_test, _, y_test = load_hard_dataset(dataset)
+    _, X_test, _, y_test, metadata = load_hard_dataset(dataset, return_metadata=True)
 
     scores_dict[dataset] = {}
+    predictions_dict[dataset] = {
+        "y": np.asarray(y_test),
+        "groups": np.asarray(metadata["test_groups"]),
+        "models": {},
+    }
 
     for estimator in tqdm(estimator_dict, desc=dataset, leave=False):
         search = joblib.load(MODELS_DIR / f"{dataset}_{estimator}.pkl")
         scores_dict[dataset][estimator] = evaluate_model_on_test_set(
-            search, X_test, y_test
+            search,
+            X_test,
+            y_test,
+            groups=metadata["test_groups"],
         )
+        predictions_dict[dataset]["models"][estimator] = {
+            "probability": search.predict_proba(X_test)[:, 1],
+            "threshold": search.decision_threshold_,
+        }
 
 with open(MODELS_DIR / "results", "wb") as fp:
     pickle.dump(scores_dict, fp)
+
+with open(MODELS_DIR / "predictions", "wb") as fp:
+    pickle.dump(predictions_dict, fp)

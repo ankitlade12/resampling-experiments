@@ -58,6 +58,28 @@ def test_diabetes130_drops_id_columns():
         assert col not in X_test.columns
 
 
+def test_diabetes130_patient_groups_are_disjoint():
+    """No patient's encounters may occur in both train and test partitions."""
+    try:
+        _, _, _, _, metadata = load_hard_dataset(
+            "diabetes130", return_metadata=True
+        )
+    except (urllib.error.URLError, ConnectionError) as exc:
+        pytest.skip(f"could not fetch diabetes130: {exc}")
+
+    assert metadata["split_strategy"] == "patient_grouped"
+    assert set(metadata["train_groups"]).isdisjoint(metadata["test_groups"])
+
+
+def test_diabetes130_group_split_preserves_prevalence():
+    try:
+        _, _, y_train, y_test = load_hard_dataset("diabetes130")
+    except (urllib.error.URLError, ConnectionError) as exc:
+        pytest.skip(f"could not fetch diabetes130: {exc}")
+
+    assert abs(y_train.mean() - y_test.mean()) < 0.01
+
+
 def test_unknown_dataset_raises():
     with pytest.raises(ValueError):
         load_hard_dataset("not_a_dataset")

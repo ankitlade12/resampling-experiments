@@ -15,6 +15,22 @@ from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 from sklearn.model_selection import ParameterSampler, StratifiedKFold
 from sklearn.preprocessing import MinMaxScaler
 
+from configs.experiment import (
+    CV_RANDOM_STATE,
+    CV_SPLITS,
+    HALVING_CANDIDATES,
+    HALVING_FACTOR,
+    HALVING_RESOURCES,
+    PARAMETER_RANDOM_STATE,
+    THRESHOLD_METRIC,
+)
+from functions.calibration import (
+    ProbabilityCalibratedClassifier,
+    calibrate_probability,
+    fit_sigmoid_calibrator,
+)
+from functions.evaluation import select_f1_threshold
+
 
 def undersample_data(undersampler, X, y, scale):
     """
@@ -60,7 +76,9 @@ def undersample_data(undersampler, X, y, scale):
     X = np.asarray(X)
     y = np.asarray(y)
 
-    skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=10)
+    skf = StratifiedKFold(
+        n_splits=CV_SPLITS, shuffle=True, random_state=CV_RANDOM_STATE
+    )
 
     xtrain, ytrain, xtest, ytest = [], [], [], []
 
@@ -114,10 +132,9 @@ def train_model_w_undersampling(
     Undersampling is applied once upfront (via `undersample_data`) rather than
     inside a pipeline, so slow undersamplers like CNN are not re-run on every
     candidate during hyperparameter search.
-    The tuning uses a manual successive halving approach:
-      - Round 1: 100 candidates with n_estimators=10, scored on 3 folds
-      - Round 2: top 10 candidates with n_estimators=300, scored on 3 folds
-      - Final:   best candidate retrained with n_estimators=800 on full data
+    The tuning uses the same successive-halving budget as ``train_model``:
+    100/34/12/4/2 candidates at 10/30/90/270/810 estimators, respectively.
+    The winner is refit with 810 estimators on all undersampled training data.
 
     Parameters
     ----------
@@ -140,73 +157,93 @@ def train_model_w_undersampling(
     if scoring not in valid_scorings:
         raise ValueError(f"scoring must be one of {valid_scorings}, got '{scoring}'")
 
-    n_iter = 100
-    param_list = list(ParameterSampler(params, n_iter=n_iter, random_state=42))
+    if not (len(xtrainu) == len(ytrainu) == len(xtest) == len(ytest) == CV_SPLITS):
+        raise ValueError(f"Expected {CV_SPLITS} precomputed folds.")
 
-    # --- Round 1: screen all candidates with n_estimators=10 ---
-    results = []
-    for params_ in param_list:
-        fold_scores = []
-        temp_params = params_.copy()
-        temp_params["n_estimators"] = 10
+    candidates = list(
+        ParameterSampler(
+            params,
+            n_iter=HALVING_CANDIDATES[0],
+            random_state=PARAMETER_RANDOM_STATE,
+        )
+    )
+    best_y_oof = None
+    best_prob_oof = None
 
-        for i in range(3):
-            clf = clone(model)
-            clf.set_params(**temp_params)
-            clf.fit(xtrainu[i], ytrainu[i])
-            y_pred = clf.predict_proba(xtest[i])[:, 1]
+    # Explicitly mirror sklearn's successive-halving schedule because every
+    # candidate must be trained on a different pre-undersampled fold.
+    for round_index, (resource, keep) in enumerate(
+        zip(HALVING_RESOURCES, HALVING_CANDIDATES[1:] + (1,))
+    ):
+        results = []
+        for params_ in candidates:
+            fold_scores = []
+            fold_truth = []
+            fold_probabilities = []
+            temp_params = {**params_, "n_estimators": resource}
 
-            if scoring == "log_loss":
-                fold_scores.append(log_loss(ytest[i], y_pred))
-            elif scoring == "roc_auc":
-                fold_scores.append(roc_auc_score(ytest[i], y_pred))
-            elif scoring == "brier":
-                fold_scores.append(brier_score_loss(ytest[i], y_pred))
+            for i in range(CV_SPLITS):
+                clf = clone(model)
+                clf.set_params(**temp_params)
+                clf.fit(xtrainu[i], ytrainu[i])
+                y_pred = clf.predict_proba(xtest[i])[:, 1]
+                fold_truth.append(np.asarray(ytest[i]))
+                fold_probabilities.append(y_pred)
 
-        avg_score = np.mean(fold_scores)
-        results.append((params_, avg_score))
+                if scoring == "log_loss":
+                    fold_scores.append(log_loss(ytest[i], y_pred))
+                elif scoring == "roc_auc":
+                    fold_scores.append(roc_auc_score(ytest[i], y_pred))
+                else:
+                    fold_scores.append(brier_score_loss(ytest[i], y_pred))
 
-    # Promote top 10
-    if scoring == "roc_auc":
-        top10 = sorted(results, key=lambda x: x[1], reverse=True)[:10]
-    else:
-        top10 = sorted(results, key=lambda x: x[1])[:10]
+            results.append(
+                (
+                    params_,
+                    float(np.mean(fold_scores)),
+                    np.concatenate(fold_truth),
+                    np.concatenate(fold_probabilities),
+                )
+            )
 
-    # --- Round 2: re-evaluate top 10 with n_estimators=300 ---
-    results_r2 = []
-    for params_, _ in top10:
-        fold_scores = []
-        temp_params = params_.copy()
-        temp_params["n_estimators"] = 300
+        ranked = sorted(
+            results,
+            key=lambda item: item[1],
+            reverse=scoring == "roc_auc",
+        )
+        winners = ranked[:keep]
+        candidates = [item[0] for item in winners]
 
-        for i in range(3):
-            clf = clone(model)
-            clf.set_params(**temp_params)
-            clf.fit(xtrainu[i], ytrainu[i])
-            y_pred = clf.predict_proba(xtest[i])[:, 1]
+        if round_index == len(HALVING_RESOURCES) - 1:
+            best_params, best_score, best_y_oof, best_prob_oof = winners[0]
 
-            if scoring == "log_loss":
-                fold_scores.append(log_loss(ytest[i], y_pred))
-            elif scoring == "roc_auc":
-                fold_scores.append(roc_auc_score(ytest[i], y_pred))
-            elif scoring == "brier":
-                fold_scores.append(brier_score_loss(ytest[i], y_pred))
-
-        avg_score = np.mean(fold_scores)
-        results_r2.append((params_, avg_score))
-
-    # Select best configuration
-    if scoring == "roc_auc":
-        best_params, best_score = max(results_r2, key=lambda x: x[1])
-    else:
-        best_params, best_score = min(results_r2, key=lambda x: x[1])
-
-    # --- Final refit with n_estimators=800 on full undersampled data ---
     best_params_final = best_params.copy()
-    best_params_final["n_estimators"] = 800
+    best_params_final["n_estimators"] = HALVING_RESOURCES[-1]
 
     model = clone(model)
     model.set_params(**best_params_final)
     model.fit(Xu, yu)
+    calibrator = fit_sigmoid_calibrator(best_prob_oof, best_y_oof)
+    calibrated_oof = calibrate_probability(calibrator, best_prob_oof)
+    model = ProbabilityCalibratedClassifier(model, calibrator)
+    model.decision_threshold_ = select_f1_threshold(best_y_oof, calibrated_oof)
+    model.threshold_selection_ = {
+        "metric": THRESHOLD_METRIC,
+        "source": f"{CV_SPLITS}-fold out-of-fold training predictions",
+        "random_state": CV_RANDOM_STATE,
+    }
+    model.search_protocol_ = {
+        "factor": HALVING_FACTOR,
+        "candidate_schedule": HALVING_CANDIDATES,
+        "resource_schedule": HALVING_RESOURCES,
+        "scoring": scoring,
+        "best_score": best_score,
+    }
+    model.probability_calibration_ = {
+        "method": "sigmoid_on_logit",
+        "source": f"{CV_SPLITS}-fold out-of-fold training predictions",
+        "original_prevalence": float(np.asarray(best_y_oof).mean()),
+        "refit_prevalence": float(np.asarray(yu).mean()),
+    }
 
     return model

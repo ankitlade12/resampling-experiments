@@ -52,7 +52,7 @@ def test_returns_fitted_estimator(undersampled_folds, params):
     assert hasattr(model, "estimators_")
 
 
-def test_final_model_has_800_estimators(undersampled_folds, params):
+def test_final_model_has_matched_resource_budget(undersampled_folds, params):
     xtrainu, ytrainu, xtest, ytest, Xu, yu = undersampled_folds
     model = train_model_w_undersampling(
         RandomForestClassifier(random_state=10),
@@ -64,7 +64,13 @@ def test_final_model_has_800_estimators(undersampled_folds, params):
         Xu,
         yu,
     )
-    assert model.n_estimators == 800
+    assert model.n_estimators == 810
+    assert model.search_protocol_["candidate_schedule"] == (100, 34, 12, 4, 2)
+    assert model.search_protocol_["resource_schedule"] == (10, 30, 90, 270, 810)
+    assert model.probability_calibration_["method"] == "sigmoid_on_logit"
+    assert model.probability_calibration_["original_prevalence"] != (
+        model.probability_calibration_["refit_prevalence"]
+    )
 
 
 def test_scoring_metrics_produce_different_results(undersampled_folds, params):

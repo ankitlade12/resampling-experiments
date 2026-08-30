@@ -1,8 +1,13 @@
+"""Leakage-safe model evaluation for imbalanced binary classification."""
+
 import numpy as np
 from sklearn.metrics import (
     average_precision_score,
+    balanced_accuracy_score,
     brier_score_loss,
+    confusion_matrix,
     f1_score,
+    matthews_corrcoef,
     precision_recall_curve,
     precision_score,
     recall_score,
@@ -10,164 +15,296 @@ from sklearn.metrics import (
 )
 
 
-def predict_class(y, prob):
-    """
-    Predict binary classes using an optimal threshold derived from the precision-recall curve.
-
-    The best threshold is selected by maximizing the F1 score across all
-    thresholds returned by the precision-recall curve.
-
-    Parameters
-    ----------
-    y : array-like of shape (n_samples,)
-        True binary labels.
-    prob : array-like of shape (n_samples,)
-        Predicted probabilities for the positive class.
-
-    Returns
-    -------
-    preds : array of shape (n_samples,)
-        Binary predictions obtained by applying the best threshold.
-    best_threshold : float
-        Threshold value that maximizes the F1 score.
-    """
-    precisions, recalls, thresholds = precision_recall_curve(y, prob)
-
-    # Calculate F1 scores and get threshold that gives max F1
-    f1_scores = 2 * (precisions * recalls) / (precisions + recalls + 1e-6)
-    best_idx = np.argmax(f1_scores)
-    best_threshold = thresholds[best_idx]
-
-    # Apply new threshold
-    preds = (prob >= best_threshold).astype(int)
-    return preds, best_threshold
+METRIC_NAMES = (
+    "roc",
+    "ap",
+    "precision",
+    "recall",
+    "f1_score",
+    "mcc",
+    "ba",
+    "brier",
+    "gmean",
+)
 
 
-def calculate_classif_metrics(y, prob):
-    """
-    Get the best value of various classification metrics.
+def select_f1_threshold(y, prob):
+    """Select an F1-optimal threshold from validation or OOF predictions.
 
-    Returns the maximum of Matthews correlation coefficient, balanced accuracy
-    and geometric mean over all decision thresholds (each unique predicted
-    probability, with samples scored positive when ``prob >= threshold``).
-
-    This is a vectorized equivalent of looping over ``np.unique(prob)`` and
-    calling the scikit-learn / imbalanced-learn scorers at each threshold: the
-    confusion-matrix counts at every threshold are obtained from cumulative sums
-    of the probability-sorted labels, which is O(n log n) instead of O(n^2) and
-    matters on large test sets where boosting models produce many distinct
-    probabilities. The returned maxima are numerically identical to the loop.
+    This function is intentionally separate from test evaluation. Callers must
+    learn the threshold from training-only validation predictions and freeze it
+    before evaluating a held-out test partition.
     """
     y = np.asarray(y).astype(int)
     prob = np.asarray(prob, dtype="float64")
-    n_pos = int(y.sum())
-    n_neg = y.shape[0] - n_pos
+    precisions, recalls, thresholds = precision_recall_curve(y, prob)
 
-    # Sort by descending probability so that, as the threshold is lowered, each
-    # sample is added to the positive predictions exactly once.
-    order = np.argsort(-prob, kind="mergesort")
-    y_sorted = y[order]
-    prob_sorted = prob[order]
+    if thresholds.size == 0:
+        return 0.5
 
-    tp_cum = np.cumsum(y_sorted)
-    fp_cum = np.cumsum(1 - y_sorted)
-
-    # Evaluate only at distinct probabilities: keep the last index of each run of
-    # equal values, where every sample with prob >= that value has been counted.
-    last_of_run = np.r_[np.diff(prob_sorted) != 0, True]
-    tp = tp_cum[last_of_run].astype("float64")
-    fp = fp_cum[last_of_run].astype("float64")
-    fn = n_pos - tp
-    tn = n_neg - fp
-
-    denom = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
-    mcc = np.divide(tp * tn - fp * fn, denom, out=np.zeros_like(tp), where=denom > 0)
-
-    tpr = tp / n_pos if n_pos else np.zeros_like(tp)
-    tnr = tn / n_neg if n_neg else np.zeros_like(tn)
-    ba = (tpr + tnr) / 2
-    g_mean = np.sqrt(tpr * tnr)
-
-    return float(mcc.max()), float(ba.max()), float(g_mean.max())
+    # precision_recall_curve returns one more precision/recall value than
+    # thresholds. The final point has no corresponding decision threshold.
+    f1_scores = 2 * precisions[:-1] * recalls[:-1] / (
+        precisions[:-1] + recalls[:-1] + np.finfo(float).eps
+    )
+    return float(thresholds[int(np.argmax(f1_scores))])
 
 
-def evaluate_model_on_test_set(search, X, y):
-    """
-    Evaluate a fitted model on the test set using 5 bootstrap samples (60%,
-    with replacement) to estimate dispersion.
+def predict_class(prob, threshold):
+    """Convert positive-class probabilities using a pre-selected threshold."""
+    if threshold is None:
+        raise ValueError(
+            "A validation-derived threshold is required; test labels must not be "
+            "used to optimize a decision threshold."
+        )
+    return (np.asarray(prob) >= float(threshold)).astype(int)
 
-    Returns a flat list:
-        [mean_roc_auc, std_roc_auc,
-         mean_avg_precision, std_avg_precision,
-         mean_precision, std_precision,
-         mean_recall, std_recall,
-         mean_f1, std_f1,
-         mean_mcc, std_mcc,
-         mean_ba, std_ba,
-         mean_brier, std_brier,
-         mean_gmean, std_gmean,
-         mean_threshold, std_threshold]
 
-    Precision, recall, and threshold are computed at the F1-optimal threshold
-    per bootstrap sample. Other threshold dependent metrics are obtained using
-    the threshold that maximizes them.
-    """
-    # To obtain a dispersion value, we take bootstrapped samples
-    # of a portion of the test set.
-    X = np.asarray(X)
-    y = np.asarray(y)
-    n = int(0.6 * len(X))
+def _geometric_mean(y, pred):
+    tn, fp, fn, tp = confusion_matrix(y, pred, labels=[0, 1]).ravel()
+    sensitivity = tp / (tp + fn) if tp + fn else 0.0
+    specificity = tn / (tn + fp) if tn + fp else 0.0
+    return float(np.sqrt(sensitivity * specificity))
 
-    roc, ap, precision, recall, f1score, mcc, ba, brier, gmean, thresh = (
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
+
+def calculate_classif_metrics(y, prob, threshold):
+    """Return MCC, balanced accuracy, and G-mean at one frozen threshold."""
+    pred = predict_class(prob, threshold)
+    return (
+        float(matthews_corrcoef(y, pred)),
+        float(balanced_accuracy_score(y, pred)),
+        _geometric_mean(y, pred),
     )
 
-    for seed in range(1, 6):
-        idx = np.random.default_rng(seed).choice(len(X), size=n, replace=True)
-        xs, ys = X[idx], y[idx]
-        prob = search.predict_proba(xs)[:, 1]
-        preds, t = predict_class(ys, prob)
 
-        roc.append(roc_auc_score(ys, prob))
-        ap.append(average_precision_score(ys, prob))
-        precision.append(precision_score(ys, preds))
-        recall.append(recall_score(ys, preds))
-        f1score.append(f1_score(ys, preds))
-        mcc_val, ba_val, gmean_val = calculate_classif_metrics(ys, prob)
-        mcc.append(mcc_val)
-        ba.append(ba_val)
-        gmean.append(gmean_val)
-        brier.append(brier_score_loss(ys, prob))
-        thresh.append(t)
+def _calculate_metrics(y, prob, threshold):
+    pred = predict_class(prob, threshold)
+    return {
+        "roc": float(roc_auc_score(y, prob)),
+        "ap": float(average_precision_score(y, prob)),
+        "precision": float(precision_score(y, pred, zero_division=0)),
+        "recall": float(recall_score(y, pred, zero_division=0)),
+        "f1_score": float(f1_score(y, pred, zero_division=0)),
+        "mcc": float(matthews_corrcoef(y, pred)),
+        "ba": float(balanced_accuracy_score(y, pred)),
+        "brier": float(brier_score_loss(y, prob)),
+        "gmean": _geometric_mean(y, pred),
+    }
 
-    return [
-        np.mean(roc),
-        np.std(roc),
-        np.mean(ap),
-        np.std(ap),
-        np.mean(precision),
-        np.std(precision),
-        np.mean(recall),
-        np.std(recall),
-        np.mean(f1score),
-        np.std(f1score),
-        np.mean(mcc),
-        np.std(mcc),
-        np.mean(ba),
-        np.std(ba),
-        np.mean(brier),
-        np.std(brier),
-        np.mean(gmean),
-        np.std(gmean),
-        np.mean(thresh),
-        np.std(thresh),
-    ]
+
+def _stratified_bootstrap_indices(y, rng):
+    """Resample each class independently, preserving test prevalence."""
+    parts = []
+    for label in (0, 1):
+        class_idx = np.flatnonzero(y == label)
+        if class_idx.size == 0:
+            raise ValueError("Both classes are required for bootstrap evaluation.")
+        parts.append(rng.choice(class_idx, size=class_idx.size, replace=True))
+    idx = np.concatenate(parts)
+    rng.shuffle(idx)
+    return idx
+
+
+def _cluster_members(groups):
+    """Precompute row indices belonging to each patient/entity cluster."""
+    groups = np.asarray(groups)
+    unique_groups, inverse = np.unique(groups, return_inverse=True)
+    order = np.argsort(inverse, kind="stable")
+    boundaries = np.flatnonzero(np.diff(inverse[order])) + 1
+    return np.split(order, boundaries)
+
+
+def _cluster_bootstrap_indices(members, rng):
+    """Resample complete patient/entity clusters with replacement."""
+    sampled_positions = rng.integers(0, len(members), size=len(members))
+    return np.concatenate([members[position] for position in sampled_positions])
+
+
+def bootstrap_metric_intervals(
+    y,
+    prob,
+    threshold,
+    *,
+    groups=None,
+    n_bootstrap=1000,
+    confidence_level=0.95,
+    random_state=0,
+):
+    """Return percentile confidence intervals from test-set resampling.
+
+    Ordinary datasets use a stratified row bootstrap. When ``groups`` is
+    provided, complete clusters are resampled so repeated encounters from the
+    same patient remain together.
+    """
+    if n_bootstrap < 100:
+        raise ValueError("n_bootstrap must be at least 100 for stable intervals.")
+    if not 0 < confidence_level < 1:
+        raise ValueError("confidence_level must be between 0 and 1.")
+
+    y = np.asarray(y).astype(int)
+    prob = np.asarray(prob, dtype="float64")
+    if groups is not None and len(groups) != len(y):
+        raise ValueError("groups must have the same length as y.")
+
+    rng = np.random.default_rng(random_state)
+    samples = {metric: [] for metric in METRIC_NAMES}
+    cluster_members = _cluster_members(groups) if groups is not None else None
+
+    for _ in range(n_bootstrap):
+        if groups is None:
+            idx = _stratified_bootstrap_indices(y, rng)
+        else:
+            idx = _cluster_bootstrap_indices(cluster_members, rng)
+
+        # A small cluster sample can occasionally contain one class only.
+        if np.unique(y[idx]).size < 2:
+            continue
+        values = _calculate_metrics(y[idx], prob[idx], threshold)
+        for metric, value in values.items():
+            samples[metric].append(value)
+
+    alpha = (1 - confidence_level) / 2
+    intervals = {}
+    for metric, values in samples.items():
+        if not values:
+            raise ValueError(f"No valid bootstrap replicates for {metric}.")
+        low, high = np.quantile(values, [alpha, 1 - alpha])
+        intervals[metric] = (float(low), float(high))
+    return intervals
+
+
+def paired_bootstrap_difference(
+    y,
+    reference_prob,
+    candidate_prob,
+    reference_threshold,
+    candidate_threshold,
+    *,
+    metric="roc",
+    groups=None,
+    n_bootstrap=1000,
+    confidence_level=0.95,
+    random_state=0,
+):
+    """Estimate a candidate-versus-reference effect with paired resampling.
+
+    The same test rows or clusters are selected for both models in every
+    replicate. Positive differences always favor the candidate; Brier loss is
+    therefore ``reference - candidate`` while all other metrics use
+    ``candidate - reference``.
+    """
+    if metric not in METRIC_NAMES:
+        raise ValueError(f"metric must be one of {METRIC_NAMES}.")
+    if n_bootstrap < 100:
+        raise ValueError("n_bootstrap must be at least 100 for stable intervals.")
+    if not 0 < confidence_level < 1:
+        raise ValueError("confidence_level must be between 0 and 1.")
+
+    y = np.asarray(y).astype(int)
+    reference_prob = np.asarray(reference_prob, dtype="float64")
+    candidate_prob = np.asarray(candidate_prob, dtype="float64")
+    if not len(y) == len(reference_prob) == len(candidate_prob):
+        raise ValueError("y and both probability arrays must have equal length.")
+    if groups is not None and len(groups) != len(y):
+        raise ValueError("groups must have the same length as y.")
+
+    def effect(indices):
+        reference = _calculate_metrics(
+            y[indices], reference_prob[indices], reference_threshold
+        )[metric]
+        candidate = _calculate_metrics(
+            y[indices], candidate_prob[indices], candidate_threshold
+        )[metric]
+        return reference - candidate if metric == "brier" else candidate - reference
+
+    point = effect(np.arange(len(y)))
+    rng = np.random.default_rng(random_state)
+    members = _cluster_members(groups) if groups is not None else None
+    differences = []
+
+    for _ in range(n_bootstrap):
+        indices = (
+            _stratified_bootstrap_indices(y, rng)
+            if groups is None
+            else _cluster_bootstrap_indices(members, rng)
+        )
+        if np.unique(y[indices]).size < 2:
+            continue
+        differences.append(effect(indices))
+
+    if not differences:
+        raise ValueError("No valid paired bootstrap replicates.")
+    alpha = (1 - confidence_level) / 2
+    low, high = np.quantile(differences, [alpha, 1 - alpha])
+    return {
+        "metric": metric,
+        "difference": float(point),
+        "ci_low": float(low),
+        "ci_high": float(high),
+        "positive_favors": "candidate",
+        "n_bootstrap_valid": len(differences),
+    }
+
+
+def evaluate_predictions(
+    y,
+    prob,
+    threshold,
+    *,
+    groups=None,
+    n_bootstrap=1000,
+    confidence_level=0.95,
+    random_state=0,
+):
+    """Evaluate frozen predictions without making choices from test labels."""
+    y = np.asarray(y).astype(int)
+    prob = np.asarray(prob, dtype="float64")
+    point = _calculate_metrics(y, prob, threshold)
+    intervals = bootstrap_metric_intervals(
+        y,
+        prob,
+        threshold,
+        groups=groups,
+        n_bootstrap=n_bootstrap,
+        confidence_level=confidence_level,
+        random_state=random_state,
+    )
+
+    result = {"threshold": float(threshold), "n_test": int(len(y))}
+    for metric in METRIC_NAMES:
+        result[metric] = point[metric]
+        result[f"{metric}_ci_low"] = intervals[metric][0]
+        result[f"{metric}_ci_high"] = intervals[metric][1]
+    return result
+
+
+def evaluate_model_on_test_set(
+    model,
+    X,
+    y,
+    *,
+    threshold=None,
+    groups=None,
+    n_bootstrap=1000,
+    confidence_level=0.95,
+    random_state=0,
+):
+    """Evaluate a fitted model using its training-derived frozen threshold."""
+    if threshold is None:
+        threshold = getattr(model, "decision_threshold_", None)
+    if threshold is None:
+        raise ValueError(
+            "Model has no decision_threshold_. Retrain it with OOF threshold "
+            "selection or pass a threshold learned from validation data."
+        )
+
+    prob = model.predict_proba(X)[:, 1]
+    return evaluate_predictions(
+        y,
+        prob,
+        threshold,
+        groups=groups,
+        n_bootstrap=n_bootstrap,
+        confidence_level=confidence_level,
+        random_state=random_state,
+    )

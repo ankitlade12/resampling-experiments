@@ -21,9 +21,11 @@ import numpy as np
 from tqdm import tqdm
 
 from configs.ensemble_models import estimator_dict
+from configs.experiment import HALVING_CANDIDATES, HALVING_RESOURCES, PROTOCOL_VERSION
 from configs.hyperparams import hyperparam_ensemble_dict
 from functions.cv import train_model
 from functions.imbalanced_data import DATASETS_IMBALANCED, load_imbalanced_dataset
+from functions.provenance import fingerprint_dataset, initialize_run, register_dataset
 
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -31,10 +33,28 @@ warnings.filterwarnings("ignore", message=".*sklearn.utils.parallel.delayed.*")
 
 OUTPUT_DIR = REPO_ROOT / "models" / "ensembles-imbalanced"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+MANIFEST_PATH = initialize_run(
+    OUTPUT_DIR,
+    {
+        "protocol_version": PROTOCOL_VERSION,
+        "script": Path(__file__).name,
+        "datasets": list(DATASETS_IMBALANCED),
+        "estimators": list(estimator_dict),
+        "scoring": "roc_auc",
+        "halving_candidates": HALVING_CANDIDATES,
+        "halving_resources": HALVING_RESOURCES,
+    },
+    REPO_ROOT,
+)
 
 problematic = []
 for dataset in tqdm(DATASETS_IMBALANCED, desc="Datasets"):
     X_train, X_test, y_train, y_test = load_imbalanced_dataset(dataset)
+    register_dataset(
+        MANIFEST_PATH,
+        dataset,
+        fingerprint_dataset(X_train, y_train, X_test, y_test),
+    )
 
     for estimator, params in tqdm(
         zip(estimator_dict, hyperparam_ensemble_dict),

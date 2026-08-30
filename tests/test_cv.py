@@ -44,12 +44,11 @@ def test_sample_weight_default(mocker, classification_data):
     estimator = RandomForestClassifier(random_state=10)
     params = {"max_depth": [2, 3]}
     mock_search = mocker.patch("functions.cv.HalvingRandomSearchCV")
+    mocker.patch("functions.cv._attach_oof_threshold")
 
     train_model(estimator, params, X_train, y_train)
 
-    mock_search.return_value.fit.assert_called_once_with(
-        X_train, y_train, sample_weight=None
-    )
+    mock_search.return_value.fit.assert_called_once_with(X_train, y_train)
 
 
 def test_sample_weight_passed(mocker, classification_data):
@@ -58,12 +57,24 @@ def test_sample_weight_passed(mocker, classification_data):
     estimator = RandomForestClassifier(random_state=10)
     params = {"max_depth": [2, 3]}
     mock_search = mocker.patch("functions.cv.HalvingRandomSearchCV")
+    mocker.patch("functions.cv._attach_oof_threshold")
 
     train_model(estimator, params, X_train, y_train, sample_weight=sample_weight)
 
     mock_search.return_value.fit.assert_called_once_with(
         X_train, y_train, sample_weight=sample_weight
     )
+
+
+def test_threshold_is_learned_from_oof_predictions(fitted_search):
+    assert 0 <= fitted_search.decision_threshold_ <= 1
+    assert fitted_search.threshold_selection_["source"].startswith("3-fold")
+
+
+def test_probabilities_are_calibrated_from_oof_predictions(fitted_search):
+    assert fitted_search.probability_calibration_["method"] == "sigmoid_on_logit"
+    assert fitted_search.probability_calibration_["source"].startswith("3-fold")
+
 
 @pytest.mark.parametrize(
     "IR, expected_weights",

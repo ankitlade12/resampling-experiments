@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from functions.analysis import create_df
+from functions.analysis import create_df, holm_adjust
 
 
 @pytest.fixture
@@ -69,19 +69,27 @@ def test_create_df_columns(sample_scores_dict):
     assert list(df.columns) == expected_cols
 
 
+def test_holm_adjust_preserves_order_and_controls_family():
+    adjusted = holm_adjust([0.01, 0.04, 0.03])
+    assert adjusted.tolist() == pytest.approx([0.03, 0.06, 0.06])
+
+
+def test_holm_adjust_rejects_invalid_pvalues():
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        holm_adjust([0.2, float("nan")])
+
+
 def test_create_df_models_as_index(sample_scores_dict):
     models = ["logit", "knn"]
     df = create_df(sample_scores_dict, "dataset1", models)
     assert list(df.index) == models, f"Expected index {models}, got {list(df.index)}"
 
 
-def test_create_df_fillna(sample_scores_dict):
+def test_create_df_rejects_missing_values(sample_scores_dict):
     # Introduce a NaN manually
     sample_scores_dict["dataset1"]["logit"]["roc"] = None
-    df = create_df(sample_scores_dict, "dataset1", ["logit"])
-    assert (
-        df.isnull().sum().sum() == 0
-    ), f"Expected no NaN values, got {df.isnull().sum().sum()} NaNs"
+    with pytest.raises(ValueError, match="Missing evaluation values"):
+        create_df(sample_scores_dict, "dataset1", ["logit"])
 
 
 def test_create_df_missing_model(sample_scores_dict):

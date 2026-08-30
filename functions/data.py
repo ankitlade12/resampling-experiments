@@ -69,8 +69,19 @@ def load_dataset(dataset):
 
         data = data.iloc[:, :-1]
 
+        # Split before learning any preprocessing parameters.
+        X_train, X_test, y_train, y_test = train_test_split(
+            data,
+            target,
+            test_size=0.3,
+            random_state=0,
+            stratify=target,
+        )
+
         if dataset == "kddcup-buffer_overflow_vs_back":
-            data = DropConstantFeatures().fit_transform(data)
+            dropper = DropConstantFeatures()
+            X_train = dropper.fit_transform(X_train)
+            X_test = dropper.transform(X_test)
 
         # some datasets contain categorical variables
         if dataset in [
@@ -78,15 +89,12 @@ def load_dataset(dataset):
             "cleveland-0_vs_4",
             "kr-vs-k-one_vs_fifteen",
         ]:
-            data = OrdinalEncoder(encoding_method="arbitrary").fit_transform(data)
-
-        # separate dataset into train and test
-        X_train, X_test, y_train, y_test = train_test_split(
-            data,
-            target,
-            test_size=0.3,
-            random_state=0,
-        )
+            encoder = OrdinalEncoder(
+                encoding_method="arbitrary",
+                unseen="encode",
+            )
+            X_train = encoder.fit_transform(X_train)
+            X_test = encoder.transform(X_test)
 
         return X_train, X_test, y_train, y_test
 
@@ -95,15 +103,17 @@ def load_dataset(dataset):
         data = fetch_datasets()[dataset]
         data.target = np.where(data.target < 0, 0, 1)
 
-        # remove constant features
-        if dataset in ["arrhythmia", "oil", "optical_digits", "thyroid_sick"]:
-            data.data = DropConstantFeatures().fit_transform(data.data)
-
-        # separate dataset into train and test
+        # Split before learning any preprocessing parameters.
         X_train, X_test, y_train, y_test = train_test_split(
             data.data,
             data.target,
             test_size=0.3,
             random_state=0,
+            stratify=data.target,
         )
+
+        if dataset in ["arrhythmia", "oil", "optical_digits", "thyroid_sick"]:
+            dropper = DropConstantFeatures()
+            X_train = dropper.fit_transform(X_train)
+            X_test = dropper.transform(X_test)
         return X_train, X_test, y_train, y_test

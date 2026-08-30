@@ -41,7 +41,13 @@ def _cache_path(name):
 
 
 def _split(X, y):
-    return train_test_split(X, y, test_size=0.3, random_state=0)
+    return train_test_split(
+        X,
+        y,
+        test_size=0.3,
+        random_state=0,
+        stratify=y,
+    )
 
 
 def _fetch_uci(name, dataset_id):

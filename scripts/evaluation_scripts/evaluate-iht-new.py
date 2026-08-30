@@ -1,9 +1,10 @@
 """
 Evaluate IHT-undersampling models trained on the new datasets.
 
-Loads each model saved by train-iht-new.py, evaluates it on the test set with
-bootstrapped samples (metrics at the optimal threshold), and stores one results
-pickle per IHT threshold in models/iht-new/ (matching evaluate-iht.py).
+Loads each model saved by train-iht-new.py, evaluates it on the test set at the
+training-derived frozen threshold with bootstrap confidence intervals, and
+stores one results pickle per IHT threshold in models/iht-new/ (matching
+evaluate-iht.py).
 """
 
 import pickle
@@ -15,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 import joblib
+import numpy as np
 from tqdm import tqdm
 
 from configs.ensemble_models import estimator_dict
@@ -39,18 +41,43 @@ MODELS_DIR = REPO_ROOT / "models" / "iht-new"
 
 for undersampler in tqdm(IHT_VERSIONS, desc="IHT versions"):
     scores_dict = {}
+    predictions_dict = {}
 
     for dataset, loader in LOADERS.items():
-        _, X_test, _, y_test = loader(dataset)
+        if loader is load_hard_dataset:
+            _, X_test, _, y_test, metadata = loader(
+                dataset, return_metadata=True
+            )
+            groups = metadata["test_groups"]
+        else:
+            _, X_test, _, y_test = loader(dataset)
+            groups = None
 
         scores_dict[dataset] = {}
+        predictions_dict[dataset] = {
+            "y": np.asarray(y_test),
+            "groups": None if groups is None else np.asarray(groups),
+            "models": {},
+        }
         for estimator in estimator_dict:
             model = joblib.load(
                 MODELS_DIR / f"{dataset}_{estimator}_{undersampler}.pkl"
             )
             scores_dict[dataset][f"{estimator}_{undersampler}"] = (
-                evaluate_model_on_test_set(model, X_test, y_test)
+                evaluate_model_on_test_set(
+                    model,
+                    X_test,
+                    y_test,
+                    groups=groups,
+                )
             )
+            predictions_dict[dataset]["models"][f"{estimator}_{undersampler}"] = {
+                "probability": model.predict_proba(X_test)[:, 1],
+                "threshold": model.decision_threshold_,
+            }
 
     with open(MODELS_DIR / f"results_{undersampler}", "wb") as fp:
         pickle.dump(scores_dict, fp)
+
+    with open(MODELS_DIR / f"predictions_{undersampler}", "wb") as fp:
+        pickle.dump(predictions_dict, fp)
