@@ -37,6 +37,7 @@ This comprehensive guide explores common misconceptions about handling imbalance
 - Train-only fitting of imputers, encoders, and feature filters
 - Matched successive-halving budgets across baseline and undersampled models
 - Training-only OOF decision thresholds, frozen before test evaluation
+- Training-only OOF sigmoid calibration, including undersampled models
 - Full-test point estimates with 1,000-replicate bootstrap intervals
 - Patient-cluster bootstrap where observations are repeated
 - Paired model differences and Holm adjustment for comparison families

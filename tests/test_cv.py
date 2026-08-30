@@ -70,6 +70,12 @@ def test_threshold_is_learned_from_oof_predictions(fitted_search):
     assert 0 <= fitted_search.decision_threshold_ <= 1
     assert fitted_search.threshold_selection_["source"].startswith("3-fold")
 
+
+def test_probabilities_are_calibrated_from_oof_predictions(fitted_search):
+    assert fitted_search.probability_calibration_["method"] == "sigmoid_on_logit"
+    assert fitted_search.probability_calibration_["source"].startswith("3-fold")
+
+
 @pytest.mark.parametrize(
     "IR, expected_weights",
     [

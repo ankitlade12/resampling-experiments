@@ -24,6 +24,11 @@ from configs.experiment import (
     PARAMETER_RANDOM_STATE,
     THRESHOLD_METRIC,
 )
+from functions.calibration import (
+    ProbabilityCalibratedClassifier,
+    calibrate_probability,
+    fit_sigmoid_calibrator,
+)
 from functions.evaluation import select_f1_threshold
 
 
@@ -152,13 +157,7 @@ def train_model_w_undersampling(
     if scoring not in valid_scorings:
         raise ValueError(f"scoring must be one of {valid_scorings}, got '{scoring}'")
 
-    if not (
-        len(xtrainu)
-        == len(ytrainu)
-        == len(xtest)
-        == len(ytest)
-        == CV_SPLITS
-    ):
+    if not (len(xtrainu) == len(ytrainu) == len(xtest) == len(ytest) == CV_SPLITS):
         raise ValueError(f"Expected {CV_SPLITS} precomputed folds.")
 
     candidates = list(
@@ -224,7 +223,10 @@ def train_model_w_undersampling(
     model = clone(model)
     model.set_params(**best_params_final)
     model.fit(Xu, yu)
-    model.decision_threshold_ = select_f1_threshold(best_y_oof, best_prob_oof)
+    calibrator = fit_sigmoid_calibrator(best_prob_oof, best_y_oof)
+    calibrated_oof = calibrate_probability(calibrator, best_prob_oof)
+    model = ProbabilityCalibratedClassifier(model, calibrator)
+    model.decision_threshold_ = select_f1_threshold(best_y_oof, calibrated_oof)
     model.threshold_selection_ = {
         "metric": THRESHOLD_METRIC,
         "source": f"{CV_SPLITS}-fold out-of-fold training predictions",
@@ -236,6 +238,12 @@ def train_model_w_undersampling(
         "resource_schedule": HALVING_RESOURCES,
         "scoring": scoring,
         "best_score": best_score,
+    }
+    model.probability_calibration_ = {
+        "method": "sigmoid_on_logit",
+        "source": f"{CV_SPLITS}-fold out-of-fold training predictions",
+        "original_prevalence": float(np.asarray(best_y_oof).mean()),
+        "refit_prevalence": float(np.asarray(yu).mean()),
     }
 
     return model

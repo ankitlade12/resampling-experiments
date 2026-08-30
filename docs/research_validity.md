@@ -22,9 +22,8 @@ dataset, split, estimator family, hyperparameter-search budget, and test rows.
 - Primary ranking metric: average precision (AP), because the positive class is
   rare and the metric directly reflects precision-recall performance.
 - Secondary threshold-free metric: ROC-AUC.
-- Probability-quality metric: Brier loss. For undersampled models, confirmatory
-  Brier claims require calibration learned only from original-prevalence
-  training folds; raw undersampled probabilities are exploratory.
+- Probability-quality metric: Brier loss, after sigmoid calibration learned
+  only from original-prevalence OOF training predictions.
 - Operational metrics: precision, recall, F1, MCC, balanced accuracy, and
   G-mean at one frozen threshold learned from training-only OOF predictions.
 
@@ -59,8 +58,10 @@ three-fold partitions, random seeds, scoring, and successive-halving resources:
 | 4 | 4 | 270 |
 | 5 | 2 | 810 |
 
-The final configuration is refit with 810 trees. Its operating threshold is
-chosen by maximizing F1 on concatenated OOF training predictions, then frozen.
+The final configuration is refit with 810 trees. Raw probabilities are passed
+through a sigmoid fitted to concatenated original-prevalence OOF predictions.
+Its operating threshold is chosen by maximizing F1 on those calibrated OOF
+predictions, then frozen.
 If sampler choice itself is optimized, it must occur inside a nested training
 CV loop; choosing the displayed winner from the final test set is exploratory.
 
@@ -97,9 +98,7 @@ start v2 in a clean directory rather than mixing versions.
 2. Archive legacy model directories and use new empty v2 output directories.
 3. Retrain ordinary baselines and special ensembles.
 4. Retrain every undersampling and IHT variant with the matched search schedule.
-5. Add training-only probability calibration for undersampled models before any
-   confirmatory Brier comparison.
-6. Generate full-test metrics, intervals, and retained prediction bundles.
-7. Run only pre-specified paired comparisons, with multiplicity correction.
-8. Rebuild notebooks from cleared outputs and replace all v1 prose with results
+5. Generate full-test metrics, intervals, and retained prediction bundles.
+6. Run only pre-specified paired comparisons, with multiplicity correction.
+7. Rebuild notebooks from cleared outputs and replace all v1 prose with results
    supported by v2 artifacts and manifests.

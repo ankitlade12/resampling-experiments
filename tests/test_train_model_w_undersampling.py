@@ -67,6 +67,10 @@ def test_final_model_has_matched_resource_budget(undersampled_folds, params):
     assert model.n_estimators == 810
     assert model.search_protocol_["candidate_schedule"] == (100, 34, 12, 4, 2)
     assert model.search_protocol_["resource_schedule"] == (10, 30, 90, 270, 810)
+    assert model.probability_calibration_["method"] == "sigmoid_on_logit"
+    assert model.probability_calibration_["original_prevalence"] != (
+        model.probability_calibration_["refit_prevalence"]
+    )
 
 
 def test_scoring_metrics_produce_different_results(undersampled_folds, params):
